@@ -1,0 +1,3 @@
+# Keep the machine usable while compiling: limit parallel rustc jobs.
+[build]
+jobs = 6

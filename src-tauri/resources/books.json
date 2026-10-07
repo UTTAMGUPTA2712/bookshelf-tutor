@@ -1,0 +1,67 @@
+{
+  "tracks": [
+    { "id": "fundamentals", "label": "Fundamentals" },
+    { "id": "web-node", "label": "Web / Node" },
+    { "id": "cpp-systems", "label": "C++ / Systems" },
+    { "id": "python-ml", "label": "Python / ML" },
+    { "id": "specialist", "label": "Specialist" },
+    { "id": "legacy", "label": "Legacy (Java / .NET)" },
+    { "id": "uncategorized", "label": "Uncategorized" }
+  ],
+  "books": [
+    { "file": "the-pragmatic-programmer.pdf", "title": "The Pragmatic Programmer", "author": "Andrew Hunt, David Thomas", "track": "fundamentals", "status": "start-here", "level": "beginner", "topics": ["craft", "practices"] },
+    { "file": "Head-First-Design-Patterns.pdf", "title": "Head First Design Patterns", "author": "Eric Freeman, Elisabeth Robson", "track": "fundamentals", "status": "start-here", "level": "beginner", "topics": ["oop", "design-patterns"] },
+    { "file": "[Pearson] - Algorithms, 4th ed. - [Sedgewick, Wayne].pdf", "title": "Algorithms, 4th Edition", "author": "Robert Sedgewick, Kevin Wayne", "track": "fundamentals", "status": "start-here", "level": "intermediate", "topics": ["algorithms", "data-structures"] },
+    { "file": "Computer Systems A Programmers Perspective 2nd Edition---Randal Bryant David Hallaron.pdf", "title": "Computer Systems: A Programmer's Perspective (2nd ed.)", "author": "Randal Bryant, David O'Hallaron", "track": "fundamentals", "status": "core", "level": "intermediate", "topics": ["memory", "processes", "systems"] },
+    { "file": "Modern Operating Systems 4th Edition--Andrew Tanenbaum.pdf", "title": "Modern Operating Systems (4th ed.)", "author": "Andrew Tanenbaum", "track": "fundamentals", "status": "core", "level": "intermediate", "topics": ["operating-systems", "concurrency"] },
+    { "file": "Operating System Concepts 8th Edition.pdf", "title": "Operating System Concepts (8th ed.)", "author": "Silberschatz, Galvin, Gagne", "track": "fundamentals", "status": "reference", "level": "intermediate", "topics": ["operating-systems"] },
+    { "file": "code complete.pdf", "title": "Code Complete", "author": "Steve McConnell", "track": "fundamentals", "status": "reference", "level": "intermediate", "topics": ["craft", "practices"] },
+    { "file": "Introduction.to.Algorithms.3rd.Edition.Sep.2010.pdf", "title": "Introduction to Algorithms (3rd ed.)", "author": "Cormen, Leiserson, Rivest, Stein", "track": "fundamentals", "status": "reference", "level": "advanced", "topics": ["algorithms", "data-structures"] },
+    { "file": "Design Patterns--Elements of Reusable Object-Oriented Software.pdf", "title": "Design Patterns: Elements of Reusable Object-Oriented Software", "author": "Gamma, Helm, Johnson, Vlissides", "track": "fundamentals", "status": "reference", "level": "advanced", "topics": ["oop", "design-patterns"] },
+    { "file": "An Introduction to Design Patterns.pdf", "title": "An Introduction to Design Patterns", "author": null, "track": "fundamentals", "status": "later", "level": "beginner", "topics": ["design-patterns"] },
+    { "file": "Design Patterns by Example--Garrett Mitchener.pdf", "title": "Design Patterns by Example", "author": "Garrett Mitchener", "track": "fundamentals", "status": "later", "level": "beginner", "topics": ["design-patterns"] },
+
+    { "file": "Mario Casciaro & Luciano Mammino - Node.js Design Patterns_ Design and implement production-grade Node.js applications using proven patterns and techniques - Packt Publishing (2020).pdf", "title": "Node.js Design Patterns (3rd ed.)", "author": "Mario Casciaro, Luciano Mammino", "track": "web-node", "status": "start-here", "level": "intermediate", "topics": ["nodejs", "javascript", "design-patterns", "async"] },
+
+    { "file": "Effective C++.pdf", "title": "Effective C++", "author": "Scott Meyers", "track": "cpp-systems", "status": "core", "level": "intermediate", "topics": ["cpp"] },
+    { "file": "Professional C++.pdf", "title": "Professional C++", "author": "Marc Gregoire", "track": "cpp-systems", "status": "core", "level": "intermediate", "topics": ["cpp"] },
+    { "file": "The C plus plus Standard Library A Tutorial and Reference (2nd).pdf", "title": "The C++ Standard Library (2nd ed.)", "author": "Nicolai Josuttis", "track": "cpp-systems", "status": "reference", "level": "intermediate", "topics": ["cpp", "stl"] },
+    { "file": "Expert C Programming Deep Secrets.pdf", "title": "Expert C Programming: Deep C Secrets", "author": "Peter van der Linden", "track": "cpp-systems", "status": "later", "level": "advanced", "topics": ["c"] },
+    { "file": "C专家编程.pdf", "title": "Expert C Programming (Chinese edition)", "author": "Peter van der Linden", "track": "cpp-systems", "status": "later", "level": "advanced", "topics": ["c"] },
+    { "file": "Modern C++ Design--Generic Programming and Design Patterns Applied.pdf", "title": "Modern C++ Design", "author": "Andrei Alexandrescu", "track": "cpp-systems", "status": "later", "level": "advanced", "topics": ["cpp", "templates", "design-patterns"] },
+    { "file": "Effective STL CN Edition.pdf", "title": "Effective STL (Chinese edition)", "author": "Scott Meyers", "track": "cpp-systems", "status": "later", "level": "intermediate", "topics": ["cpp", "stl"] },
+    { "file": "C++ Programming Wiki Edition.pdf", "title": "C++ Programming (Wikibooks)", "author": null, "track": "cpp-systems", "status": "later", "level": "beginner", "topics": ["cpp"] },
+    { "file": "Thinking In C++ Volume One.pdf", "title": "Thinking in C++, Volume One", "author": "Bruce Eckel", "track": "cpp-systems", "status": "later", "level": "beginner", "topics": ["cpp"] },
+    { "file": "Thinking In C++ Volume Two.pdf", "title": "Thinking in C++, Volume Two", "author": "Bruce Eckel", "track": "cpp-systems", "status": "later", "level": "intermediate", "topics": ["cpp"] },
+    { "file": "C++ Cookbook.pdf", "title": "C++ Cookbook (pre-C++11)", "author": "D. Ryan Stephens et al.", "track": "cpp-systems", "status": "outdated", "level": "intermediate", "topics": ["cpp"] },
+    { "file": "C++ GUI Programming With Qt 4 2nd Edition.pdf", "title": "C++ GUI Programming with Qt 4", "author": "Jasmin Blanchette, Mark Summerfield", "track": "cpp-systems", "status": "outdated", "level": "intermediate", "topics": ["cpp", "qt", "gui"] },
+
+    { "file": "Python4DataAnalysis.pdf", "title": "Python for Data Analysis", "author": "Wes McKinney", "track": "python-ml", "status": "start-here", "level": "beginner", "topics": ["python", "pandas", "numpy"] },
+    { "file": "Learning Python, 5th Edition.pdf", "title": "Learning Python (5th ed.)", "author": "Mark Lutz", "track": "python-ml", "status": "core", "level": "beginner", "topics": ["python"] },
+    { "file": "Python_Cookbook_3rd_Edition.pdf", "title": "Python Cookbook (3rd ed.)", "author": "David Beazley, Brian K. Jones", "track": "python-ml", "status": "reference", "level": "intermediate", "topics": ["python"] },
+    { "file": "deeplearningbook.pdf", "title": "Deep Learning", "author": "Ian Goodfellow, Yoshua Bengio, Aaron Courville", "track": "python-ml", "status": "core", "level": "advanced", "topics": ["deep-learning", "ml"] },
+    { "file": "Machine Learning_ An Algorithmic Perspective (2nd ed.) [Marsland 2014-10-08].pdf", "title": "Machine Learning: An Algorithmic Perspective (2nd ed.)", "author": "Stephen Marsland", "track": "python-ml", "status": "core", "level": "intermediate", "topics": ["ml"] },
+    { "file": "The Elements of Statistical Learning Data Mining Inference and Preditction.pdf", "title": "The Elements of Statistical Learning", "author": "Hastie, Tibshirani, Friedman", "track": "python-ml", "status": "reference", "level": "advanced", "topics": ["ml", "statistics"] },
+    { "file": "Pattern Recognition And Machine Learning.pdf", "title": "Pattern Recognition and Machine Learning", "author": "Christopher Bishop", "track": "python-ml", "status": "reference", "level": "advanced", "topics": ["ml", "statistics"] },
+    { "file": "Machine_Learning_in_Action.pdf", "title": "Machine Learning in Action (Python 2)", "author": "Peter Harrington", "track": "python-ml", "status": "later", "level": "intermediate", "topics": ["ml", "python"] },
+    { "file": "Programming Collective Intelligence.pdf", "title": "Programming Collective Intelligence (Python 2)", "author": "Toby Segaran", "track": "python-ml", "status": "later", "level": "intermediate", "topics": ["ml", "python"] },
+    { "file": "PythonNetBinder.pdf", "title": "Python Network Programming", "author": null, "track": "python-ml", "status": "later", "level": "intermediate", "topics": ["python", "networking"] },
+    { "file": "Core Python Programming 2000.pdf", "title": "Core Python Programming (2000, pre-Python 2)", "author": "Wesley Chun", "track": "python-ml", "status": "outdated", "level": "beginner", "topics": ["python"] },
+
+    { "file": "Dragon Book Compilers Principle Techniques and Tools 2nd Edtion.pdf", "title": "Compilers: Principles, Techniques, and Tools (2nd ed.)", "author": "Aho, Lam, Sethi, Ullman", "track": "specialist", "status": "later", "level": "advanced", "topics": ["compilers"] },
+    { "file": "Engineering A Compiler 2nd Edition by Cooper and Torczon.pdf", "title": "Engineering a Compiler (2nd ed.)", "author": "Keith Cooper, Linda Torczon", "track": "specialist", "status": "later", "level": "advanced", "topics": ["compilers"] },
+    { "file": "Compiler Construction principles and practice.pdf", "title": "Compiler Construction: Principles and Practice", "author": "Kenneth Louden", "track": "specialist", "status": "later", "level": "intermediate", "topics": ["compilers"] },
+    { "file": "Parsing Techniques.pdf", "title": "Parsing Techniques", "author": "Dick Grune, Ceriel Jacobs", "track": "specialist", "status": "later", "level": "advanced", "topics": ["compilers", "parsing"] },
+    { "file": "Computer Vision Algorithms and Applications.pdf", "title": "Computer Vision: Algorithms and Applications", "author": "Richard Szeliski", "track": "specialist", "status": "later", "level": "advanced", "topics": ["computer-vision"] },
+    { "file": "Multiple_View_Geometry_in_Computer_Vision.pdf", "title": "Multiple View Geometry in Computer Vision", "author": "Richard Hartley, Andrew Zisserman", "track": "specialist", "status": "later", "level": "advanced", "topics": ["computer-vision"] },
+    { "file": "speech and language processing.pdf", "title": "Speech and Language Processing", "author": "Dan Jurafsky, James H. Martin", "track": "specialist", "status": "later", "level": "advanced", "topics": ["nlp"] },
+    { "file": "CUDA_by_Example_Addison_Wesley_Jul_2010.pdf", "title": "CUDA by Example", "author": "Jason Sanders, Edward Kandrot", "track": "specialist", "status": "later", "level": "intermediate", "topics": ["cuda", "gpu"] },
+
+    { "file": "Beginning Java 7.pdf", "title": "Beginning Java 7", "author": "Jeff Friesen", "track": "legacy", "status": "outdated", "level": "beginner", "topics": ["java"] },
+    { "file": "Teach Yourself Java in 21 Days.pdf", "title": "Teach Yourself Java in 21 Days", "author": null, "track": "legacy", "status": "outdated", "level": "beginner", "topics": ["java"] },
+    { "file": "Beginning_C_6.0_Programming_with_Visual.pdf", "title": "Beginning C# 6.0 Programming with Visual Studio 2015", "author": "Benjamin Perkins et al.", "track": "legacy", "status": "outdated", "level": "beginner", "topics": ["csharp", "dotnet"] },
+    { "file": "illustratedc#2010.pdf", "title": "Illustrated C# 2010", "author": "Daniel Solis", "track": "legacy", "status": "outdated", "level": "beginner", "topics": ["csharp", "dotnet"] },
+    { "file": "Professional C# 2008.pdf", "title": "Professional C# 2008", "author": "Christian Nagel et al.", "track": "legacy", "status": "outdated", "level": "intermediate", "topics": ["csharp", "dotnet"] },
+    { "file": "Moving to Microsoft Visual Studio 2010.pdf", "title": "Moving to Microsoft Visual Studio 2010", "author": null, "track": "legacy", "status": "outdated", "level": "beginner", "topics": ["dotnet", "tools"] }
+  ]
+}

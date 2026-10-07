@@ -1,0 +1,15 @@
+[
+  { "type": "ollama", "label": "Ollama (local)", "adapter": "ollama", "baseUrl": "http://localhost:11434", "needsKey": false, "local": true, "docsUrl": "https://ollama.com/library", "note": "Free and offline. Models run on this computer." },
+  { "type": "lmstudio", "label": "LM Studio (local)", "adapter": "openai", "baseUrl": "http://localhost:1234/v1", "needsKey": false, "local": true, "docsUrl": "https://lmstudio.ai", "note": "Start the local server in LM Studio first." },
+  { "type": "llamacpp", "label": "llama.cpp server (local)", "adapter": "openai", "baseUrl": "http://localhost:8080/v1", "needsKey": false, "local": true, "docsUrl": "https://github.com/ggml-org/llama.cpp", "note": "" },
+  { "type": "openai", "label": "OpenAI", "adapter": "openai", "baseUrl": "https://api.openai.com/v1", "needsKey": true, "local": false, "docsUrl": "https://platform.openai.com/api-keys", "note": "" },
+  { "type": "anthropic", "label": "Anthropic", "adapter": "openai", "baseUrl": "https://api.anthropic.com/v1", "needsKey": true, "local": false, "docsUrl": "https://console.anthropic.com/settings/keys", "note": "Uses Anthropic's OpenAI-compatible endpoint (native adapter planned)." },
+  { "type": "gemini", "label": "Google Gemini", "adapter": "openai", "baseUrl": "https://generativelanguage.googleapis.com/v1beta/openai", "needsKey": true, "local": false, "docsUrl": "https://aistudio.google.com/apikey", "note": "Uses Gemini's OpenAI-compatible endpoint (native adapter planned)." },
+  { "type": "openrouter", "label": "OpenRouter", "adapter": "openai", "baseUrl": "https://openrouter.ai/api/v1", "needsKey": true, "local": false, "docsUrl": "https://openrouter.ai/keys", "note": "Hundreds of models with one key; shows prices." },
+  { "type": "groq", "label": "Groq", "adapter": "openai", "baseUrl": "https://api.groq.com/openai/v1", "needsKey": true, "local": false, "docsUrl": "https://console.groq.com/keys", "note": "Very fast; generous free tier." },
+  { "type": "mistral", "label": "Mistral", "adapter": "openai", "baseUrl": "https://api.mistral.ai/v1", "needsKey": true, "local": false, "docsUrl": "https://console.mistral.ai/api-keys", "note": "" },
+  { "type": "deepseek", "label": "DeepSeek", "adapter": "openai", "baseUrl": "https://api.deepseek.com", "needsKey": true, "local": false, "docsUrl": "https://platform.deepseek.com/api_keys", "note": "" },
+  { "type": "together", "label": "Together AI", "adapter": "openai", "baseUrl": "https://api.together.xyz/v1", "needsKey": true, "local": false, "docsUrl": "https://api.together.ai/settings/api-keys", "note": "" },
+  { "type": "xai", "label": "xAI", "adapter": "openai", "baseUrl": "https://api.x.ai/v1", "needsKey": true, "local": false, "docsUrl": "https://console.x.ai", "note": "" },
+  { "type": "custom", "label": "Custom (OpenAI-compatible)", "adapter": "openai", "baseUrl": "", "needsKey": false, "local": false, "docsUrl": "", "note": "Any server that speaks the OpenAI chat completions API." }
+]
