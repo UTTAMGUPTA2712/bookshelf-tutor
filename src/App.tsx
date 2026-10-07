@@ -1,51 +1,116 @@
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { BookOpen, History, Library as LibraryIcon, Settings as SettingsIcon } from "lucide-react";
+import { NavLink, Route, Routes } from "react-router";
+import { open } from "@tauri-apps/plugin-dialog";
 import { useState } from "react";
-import reactLogo from "./assets/react.svg";
-import { invoke } from "@tauri-apps/api/core";
-import "./App.css";
+import { api, errorMessage } from "./ipc";
+import { Button, ErrorNote, Spinner } from "./ui";
+import LibraryPage from "./pages/Library";
+import ReaderPage from "./pages/Reader";
+import QuizPage from "./pages/Quiz";
+import HistoryPage from "./pages/History";
+import SettingsPage from "./pages/Settings";
 
-function App() {
-  const [greetMsg, setGreetMsg] = useState("");
-  const [name, setName] = useState("");
+export function useAppInfo() {
+  return useQuery({ queryKey: ["appInfo"], queryFn: api.appInfo, staleTime: Infinity });
+}
 
-  async function greet() {
-    // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-    setGreetMsg(await invoke("greet", { name }));
+function Onboarding() {
+  const qc = useQueryClient();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function choose() {
+    const dir = await open({ directory: true, title: "Choose your books folder" });
+    if (typeof dir !== "string") return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api.setLibraryRoot(dir);
+      await qc.invalidateQueries();
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
-    <main className="container">
-      <h1>Welcome to Tauri + React</h1>
-
-      <div className="row">
-        <a href="https://vite.dev" target="_blank">
-          <img src="/vite.svg" className="logo vite" alt="Vite logo" />
-        </a>
-        <a href="https://tauri.app" target="_blank">
-          <img src="/tauri.svg" className="logo tauri" alt="Tauri logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
+    <div className="flex h-full items-center justify-center p-8">
+      <div className="max-w-md">
+        <BookOpen className="mb-4 size-8 text-accent" />
+        <h1 className="mb-2 text-2xl font-semibold">Welcome to Bookshelf Tutor</h1>
+        <p className="mb-6 text-muted">
+          Choose the folder that holds your PDF books. Nothing is uploaded — the app reads them where they are, and books
+          you add later are copied there too.
+        </p>
+        <ErrorNote error={error} />
+        <Button variant="primary" className="mt-4" busy={busy} onClick={choose}>
+          {busy ? "Scanning books…" : "Choose books folder"}
+        </Button>
       </div>
-      <p>Click on the Tauri, Vite, and React logos to learn more.</p>
-
-      <form
-        className="row"
-        onSubmit={(e) => {
-          e.preventDefault();
-          greet();
-        }}
-      >
-        <input
-          id="greet-input"
-          onChange={(e) => setName(e.currentTarget.value)}
-          placeholder="Enter a name..."
-        />
-        <button type="submit">Greet</button>
-      </form>
-      <p>{greetMsg}</p>
-    </main>
+    </div>
   );
 }
 
-export default App;
+const nav = [
+  { to: "/", label: "Library", icon: LibraryIcon },
+  { to: "/history", label: "Quizzes", icon: History },
+  { to: "/settings", label: "Settings", icon: SettingsIcon },
+];
+
+export default function App() {
+  const info = useAppInfo();
+
+  if (info.isLoading) {
+    return (
+      <div className="flex h-full items-center justify-center">
+        <Spinner />
+      </div>
+    );
+  }
+  if (info.error) {
+    return (
+      <div className="p-8">
+        <ErrorNote error={errorMessage(info.error)} />
+      </div>
+    );
+  }
+  if (!info.data?.libraryRoot) return <Onboarding />;
+
+  return (
+    <div className="flex h-full">
+      <aside className="flex w-48 shrink-0 flex-col border-r border-line bg-panel">
+        <div className="flex items-center gap-2 px-4 py-4 font-semibold">
+          <BookOpen className="size-5 text-accent" />
+          Bookshelf Tutor
+        </div>
+        <nav className="flex flex-col gap-0.5 px-2">
+          {nav.map(({ to, label, icon: Icon }) => (
+            <NavLink
+              key={to}
+              to={to}
+              end={to === "/"}
+              className={({ isActive }) =>
+                `flex items-center gap-2 rounded-md px-2.5 py-1.5 text-sm ${isActive ? "bg-accent-soft font-medium text-accent" : "text-ink hover:bg-sunken"}`
+              }
+            >
+              <Icon className="size-4" />
+              {label}
+            </NavLink>
+          ))}
+        </nav>
+        <div className="mt-auto px-4 py-3 text-[11px] text-muted">v{info.data.version}</div>
+      </aside>
+      <main className="relative min-w-0 flex-1 overflow-hidden">
+        <Routes>
+          <Route path="/" element={<LibraryPage />} />
+          <Route path="/book/:fingerprint" element={<ReaderPage />} />
+          <Route path="/quiz/:id" element={<QuizPage />} />
+          <Route path="/history" element={<HistoryPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
+        </Routes>
+      </main>
+    </div>
+  );
+}

@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "bookshelf-tutor",
+  "productName": "Bookshelf Tutor",
   "version": "0.1.0",
   "identifier": "com.bookshelf.tutor",
   "build": {
@@ -12,9 +12,12 @@
   "app": {
     "windows": [
       {
-        "title": "bookshelf-tutor",
-        "width": 800,
-        "height": 600
+        "title": "Bookshelf Tutor",
+        "width": 1320,
+        "height": 860,
+        "minWidth": 900,
+        "minHeight": 600,
+        "dragDropEnabled": true
       }
     ],
     "security": {
@@ -30,6 +33,11 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "resources": {
+      "resources/pdfium/*": "resources/pdfium/"
+    },
+    "category": "Education",
+    "shortDescription": "Learn from your own library of programming books"
   }
 }
