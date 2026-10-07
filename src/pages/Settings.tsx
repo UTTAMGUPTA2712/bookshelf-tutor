@@ -2,7 +2,8 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { CheckCircle2, ExternalLink, FolderOpen, KeyRound, Plus, Trash2, XCircle, Zap } from "lucide-react";
+import { CheckCircle2, Download, ExternalLink, FolderOpen, KeyRound, Plus, Trash2, XCircle, Zap } from "lucide-react";
+import { OllamaManager } from "../components/OllamaManager";
 import {
   api,
   errorMessage,
@@ -156,7 +157,7 @@ function formatPrice(m: ModelInfo) {
   return `${f(m.promptPrice)} in / ${f(m.completionPrice ?? 0)} out per 1M`;
 }
 
-function ModelPicker({ provider, onClose }: { provider: Provider; onClose: () => void }) {
+function ModelPicker({ provider, onClose, onDownload }: { provider: Provider; onClose: () => void; onDownload: () => void }) {
   const qc = useQueryClient();
   const models = useQuery({ queryKey: ["models", provider.id], queryFn: () => api.providerModels(provider.id), staleTime: 300_000 });
   const [enabled, setEnabled] = useState(new Set(provider.enabledModels));
@@ -215,9 +216,16 @@ function ModelPicker({ provider, onClose }: { provider: Provider; onClose: () =>
       <ErrorNote error={models.error ? errorMessage(models.error) : null} />
       {models.data?.length === 0 && (
         <p className="text-sm text-muted">
-          No models found.{" "}
-          {provider.adapter === "ollama" && "Download one first, e.g. run “ollama pull qwen2.5:7b” in a terminal."}
+          No models found.
         </p>
+      )}
+      {provider.adapter === "ollama" && (
+        <div className="mb-3 flex items-center gap-3 rounded-md bg-accent-soft px-3 py-2 text-sm">
+          <span className="flex-1">These are the models already on this computer. Want more?</span>
+          <Button variant="primary" onClick={onDownload}>
+            <Download className="size-4" /> Download models
+          </Button>
+        </div>
       )}
       <ul className="divide-y divide-line">
         {list.map((m) => {
@@ -273,6 +281,7 @@ function ProvidersSection() {
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<Provider | null>(null);
   const [picking, setPicking] = useState<Provider | null>(null);
+  const [managing, setManaging] = useState<Provider | null>(null);
   const del = useMutation({
     mutationFn: api.deleteProvider,
     onSuccess: () => qc.invalidateQueries({ queryKey: ["providers"] }),
@@ -302,6 +311,11 @@ function ProvidersSection() {
                 {p.baseUrl} · {p.enabledModels.length} model{p.enabledModels.length === 1 ? "" : "s"} selected
               </div>
             </div>
+            {p.adapter === "ollama" && (
+              <Button onClick={() => setManaging(p)}>
+                <Download className="size-4" /> Download models
+              </Button>
+            )}
             <Button variant="primary" onClick={() => setPicking(p)} disabled={p.needsKey && !p.hasKey}>
               Choose models
             </Button>
@@ -317,7 +331,17 @@ function ProvidersSection() {
       </Button>
       {adding && presets.data && <ProviderForm presets={presets.data} onClose={() => setAdding(false)} />}
       {editing && presets.data && <ProviderForm presets={presets.data} initial={editing} onClose={() => setEditing(null)} />}
-      {picking && <ModelPicker provider={picking} onClose={() => setPicking(null)} />}
+      {picking && (
+        <ModelPicker
+          provider={picking}
+          onClose={() => setPicking(null)}
+          onDownload={() => {
+            setManaging(picking);
+            setPicking(null);
+          }}
+        />
+      )}
+      {managing && <OllamaManager provider={managing} onClose={() => setManaging(null)} />}
     </Section>
   );
 }

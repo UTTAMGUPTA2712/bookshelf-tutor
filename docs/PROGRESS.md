@@ -17,6 +17,10 @@ Updated: 2026-10-07
 - [x] Chapter quiz: grounded generation (questions must cite excerpts), MCQ/short/explain, streamed progress,
       background grading queue, detailed per-answer review, overall review, re-read page links, chapter marked done ≥70
 - [x] Quiz history
+- [x] Ollama model manager: hardware detection (RAM/cores/Apple Silicon/NVIDIA), curated catalog of 21 models
+      (sizes verified against registry.ollama.ai on 2026-10-07) with fit badges, speed/grade-time estimates and
+      recommendations; download with progress/cancel/resume, delete, any model by name (checked against the registry);
+      thinking mode auto-disabled for thinking models
 - [x] Export/import: versioned + checksummed JSON, preview, merge (newest wins) or replace, auto-backup before import
 - [x] Safety: max-token limits, runaway-whitespace guard, Ollama uses half the cores by default, cancel requests
 - [x] 18 Rust unit tests + 2 ignored real-data tests
@@ -36,8 +40,7 @@ Updated: 2026-10-07
 
 ## Next
 1. User test pass → fix what feels wrong
-2. Ollama model manager (installed list, curated catalog with RAM fit badges, pull with progress, delete)
-3. Skill test → skill map → roadmap (Phase 4)
-4. Spaced-repetition cards from mistakes + dashboard (Phase 5)
-5. Native Anthropic/Gemini adapters, usage/cost view, embeddings + hybrid search
-6. Packaging: Mac build, GitHub Actions for all OSes, sync folder (Phase 6)
+2. Skill test → skill map → roadmap (Phase 4)
+3. Spaced-repetition cards from mistakes + dashboard (Phase 5)
+4. Native Anthropic/Gemini adapters, usage/cost view, embeddings + hybrid search
+5. Packaging: Mac build, GitHub Actions for all OSes, sync folder (Phase 6)

@@ -1,0 +1,26 @@
+{
+  "verifiedAt": "2026-10-07",
+  "models": [
+    { "name": "qwen2.5:3b", "label": "Qwen 2.5 3B", "sizeGb": 1.93, "quality": 2, "goodFor": ["questions", "fast"], "note": "Small and quick. Fine for writing easy questions; too weak for careful grading." },
+    { "name": "llama3.2:3b", "label": "Llama 3.2 3B", "sizeGb": 2.02, "quality": 2, "goodFor": ["questions", "fast"], "note": "Small general model from Meta." },
+    { "name": "granite4:tiny-h", "label": "Granite 4 Tiny", "sizeGb": 4.23, "activeGb": 0.9, "quality": 2, "goodFor": ["questions", "fast"], "note": "Mixture-of-experts: runs faster than its size suggests." },
+    { "name": "phi4-mini:3.8b", "label": "Phi-4 Mini", "sizeGb": 2.49, "quality": 2, "goodFor": ["questions", "fast"], "note": "Microsoft's small reasoning-focused model." },
+    { "name": "qwen3.5:4b", "label": "Qwen 3.5 4B", "sizeGb": 3.32, "quality": 3, "goodFor": ["questions", "grading"], "note": "Best quality at this size. Thinking mode is turned off automatically for speed." },
+    { "name": "gemma3:4b", "label": "Gemma 3 4B", "sizeGb": 3.34, "quality": 2, "goodFor": ["questions"], "note": "Google's small model." },
+    { "name": "qwen2.5:7b", "label": "Qwen 2.5 7B", "sizeGb": 4.68, "quality": 3, "goodFor": ["questions", "grading"], "note": "Reliable JSON output and no thinking phase, so it starts answering quickly on a CPU." },
+    { "name": "llama3.1:8b", "label": "Llama 3.1 8B", "sizeGb": 4.92, "quality": 3, "goodFor": ["questions", "grading"], "note": "Solid all-rounder." },
+    { "name": "qwen3:8b", "label": "Qwen 3 8B", "sizeGb": 5.23, "quality": 3, "goodFor": ["questions", "grading"], "note": "Thinking mode is turned off automatically for speed." },
+    { "name": "ministral-3:8b", "label": "Ministral 3 8B", "sizeGb": 6.02, "quality": 3, "goodFor": ["questions", "grading"], "note": "Mistral's 8B model." },
+    { "name": "qwen3.5:9b", "label": "Qwen 3.5 9B", "sizeGb": 6.55, "quality": 4, "goodFor": ["questions", "grading"], "note": "Strong grader for its size. Thinking mode is turned off automatically." },
+    { "name": "gemma4:e4b", "label": "Gemma 4 E4B", "sizeGb": 6.58, "quality": 3, "goodFor": ["questions", "grading"], "note": "Google's efficient edge model." },
+    { "name": "gemma3:12b", "label": "Gemma 3 12B", "sizeGb": 8.15, "quality": 4, "goodFor": ["questions", "grading"], "note": "Good explanations; slower on CPU." },
+    { "name": "qwen2.5:14b", "label": "Qwen 2.5 14B", "sizeGb": 8.99, "quality": 4, "goodFor": ["questions", "grading"], "note": "Careful grader; no thinking phase." },
+    { "name": "phi4:14b", "label": "Phi-4 14B", "sizeGb": 9.05, "quality": 4, "goodFor": ["grading"], "note": "Strong reasoning for its size." },
+    { "name": "ministral-3:14b", "label": "Ministral 3 14B", "sizeGb": 9.08, "quality": 4, "goodFor": ["questions", "grading"], "note": "" },
+    { "name": "qwen3:14b", "label": "Qwen 3 14B", "sizeGb": 9.28, "quality": 4, "goodFor": ["questions", "grading"], "note": "Thinking mode is turned off automatically for speed." },
+    { "name": "gpt-oss:20b", "label": "gpt-oss 20B", "sizeGb": 13.79, "activeGb": 2.4, "quality": 5, "goodFor": ["grading", "questions"], "note": "OpenAI's open model. Mixture-of-experts, so fast once loaded, but needs ~16 GB of memory." },
+    { "name": "qwen3.5:27b", "label": "Qwen 3.5 27B", "sizeGb": 17.48, "quality": 5, "goodFor": ["grading", "questions"], "note": "Top local quality. Needs a lot of memory — best on a 32 GB+ Mac." },
+    { "name": "qwen3:30b", "label": "Qwen 3 30B-A3B", "sizeGb": 18.56, "activeGb": 2.0, "quality": 5, "goodFor": ["grading", "questions"], "note": "Mixture-of-experts: big-model quality at small-model speed, if you have the memory." },
+    { "name": "gemma4:26b", "label": "Gemma 4 26B", "sizeGb": 18.73, "quality": 5, "goodFor": ["grading", "questions"], "note": "Needs a 32 GB+ machine." }
+  ]
+}

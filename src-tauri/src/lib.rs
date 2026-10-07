@@ -4,6 +4,7 @@ mod error;
 mod index;
 mod library;
 mod llm;
+mod models;
 mod pdf;
 mod quiz;
 mod secrets;
@@ -111,6 +112,11 @@ pub fn run() {
             commands::provider_test,
             commands::roles_get,
             commands::role_set,
+            commands::system_info,
+            commands::ollama_catalog,
+            commands::ollama_lookup,
+            commands::ollama_pull,
+            commands::ollama_delete,
             commands::ai_cancel,
             commands::quiz_generate,
             commands::quiz_grade,

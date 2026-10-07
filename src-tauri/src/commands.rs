@@ -14,6 +14,7 @@ use crate::index::{self, IndexStatus, SearchHit};
 use crate::library::{self, AddMode, AddResult, BookPatch, BookProgress, BookView, ProgressPatch, Track};
 use crate::llm::{self, ModelInfo, Preset, ProviderConfig, ProviderInput, RoleLink, Target};
 use crate::pdf::{self, Chapter};
+use crate::models::{self, CatalogView, LookupResult, PullProgress, SystemInfo};
 use crate::quiz::{self, Attempt, AttemptSummary, QuizOptions};
 use crate::transfer::{self, ImportMode, ImportPreview, TableChanges};
 use crate::{db, AppState};
@@ -275,6 +276,86 @@ pub fn roles_get(state: State<'_, AppState>) -> AppResult<Vec<RoleView>> {
 #[tauri::command]
 pub fn role_set(state: State<'_, AppState>, role: String, chain: Vec<RoleLink>) -> AppResult<()> {
     llm::set_role(&state.db(), &role, &chain, &state.device_id)
+}
+
+// ---------- local models (Ollama) ----------
+
+#[tauri::command]
+pub fn system_info() -> SystemInfo {
+    models::system_info()
+}
+
+fn ollama_provider(state: &AppState, provider_id: &str) -> AppResult<ProviderConfig> {
+    let p = llm::get_provider(&state.db(), provider_id)?;
+    if p.adapter != "ollama" {
+        return Err(AppError::Invalid("Model downloads are only available for Ollama".into()));
+    }
+    Ok(p)
+}
+
+#[tauri::command]
+pub async fn ollama_catalog(state: State<'_, AppState>, provider_id: String) -> AppResult<CatalogView> {
+    let p = ollama_provider(&state, &provider_id)?;
+    let installed = llm::list_models(&state.http, &p, None).await?.into_iter().map(|m| m.id).collect();
+    Ok(models::catalog_for(&models::system_info(), &installed))
+}
+
+#[tauri::command]
+pub async fn ollama_lookup(state: State<'_, AppState>, name: String) -> AppResult<LookupResult> {
+    models::lookup(&state.http, &name, &models::system_info()).await
+}
+
+/// Downloads a model and adds it to the provider's selected models.
+#[tauri::command]
+pub async fn ollama_pull(
+    state: State<'_, AppState>,
+    request_id: String,
+    provider_id: String,
+    name: String,
+    on_progress: Channel<PullProgress>,
+) -> AppResult<ProviderConfig> {
+    let p = ollama_provider(&state, &provider_id)?;
+    let s = state.inner().clone();
+    cancellable(&s.clone(), request_id, async move {
+        models::pull(&s.http, &p.base_url, &name, &mut |pr| {
+            let _ = on_progress.send(pr);
+        })
+        .await?;
+        let mut enabled = p.enabled_models.clone();
+        if !enabled.contains(&name) {
+            enabled.push(name.clone());
+        }
+        let input = ProviderInput {
+            id: Some(p.id.clone()),
+            provider_type: p.provider_type.clone(),
+            label: p.label.clone(),
+            base_url: p.base_url.clone(),
+            enabled_models: enabled,
+            options: p.options.clone(),
+            api_key: None,
+        };
+        let db = s.db();
+        llm::save_provider(&db, &input, &s.device_id)?;
+        llm::get_provider(&db, &p.id)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn ollama_delete(state: State<'_, AppState>, provider_id: String, name: String) -> AppResult<()> {
+    let p = ollama_provider(&state, &provider_id)?;
+    models::delete(&state.http, &p.base_url, &name).await?;
+    let input = ProviderInput {
+        id: Some(p.id.clone()),
+        provider_type: p.provider_type.clone(),
+        label: p.label.clone(),
+        base_url: p.base_url.clone(),
+        enabled_models: p.enabled_models.iter().filter(|m| **m != name).cloned().collect(),
+        options: p.options.clone(),
+        api_key: None,
+    };
+    llm::save_provider(&state.db(), &input, &state.device_id)?;
+    Ok(())
 }
 
 // ---------- quizzes ----------

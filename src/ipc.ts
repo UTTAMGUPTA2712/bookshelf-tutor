@@ -154,6 +154,52 @@ export interface TestResult {
   usage: { promptTokens: number | null; completionTokens: number | null };
 }
 
+export interface SystemInfo {
+  os: string;
+  arch: string;
+  cpuCores: number;
+  totalRamGb: number;
+  availableRamGb: number;
+  accelerator: "apple-silicon" | "nvidia" | "cpu";
+  usableForModelsGb: number;
+}
+
+export type Fit = "fits" | "tight" | "too-big";
+
+export interface CatalogModel {
+  name: string;
+  label: string;
+  sizeGb: number;
+  memoryNeededGb: number;
+  quality: number;
+  goodFor: string[];
+  note: string;
+  fit: Fit;
+  estTokensPerSec: number;
+  estGradeSeconds: number;
+  installed: boolean;
+  recommended: boolean;
+}
+
+export interface CatalogView {
+  system: SystemInfo;
+  verifiedAt: string;
+  models: CatalogModel[];
+}
+
+export interface LookupResult {
+  name: string;
+  sizeGb: number;
+  memoryNeededGb: number;
+  fit: Fit;
+}
+
+export interface PullProgress {
+  status: string;
+  completed: number | null;
+  total: number | null;
+}
+
 export interface Source {
   label: string;
   pageStart: number;
@@ -284,6 +330,13 @@ export const api = {
   testModel: (providerId: string, model: string) => invoke<TestResult>("provider_test", { providerId, model }),
   roles: () => invoke<Role[]>("roles_get"),
   setRole: (role: string, chain: RoleLink[]) => invoke<void>("role_set", { role, chain }),
+
+  systemInfo: () => invoke<SystemInfo>("system_info"),
+  ollamaCatalog: (providerId: string) => invoke<CatalogView>("ollama_catalog", { providerId }),
+  ollamaLookup: (name: string) => invoke<LookupResult>("ollama_lookup", { name }),
+  ollamaPull: (requestId: string, providerId: string, name: string, onProgress: (p: PullProgress) => void) =>
+    invoke<Provider>("ollama_pull", { requestId, providerId, name, onProgress: channel(onProgress) }),
+  ollamaDelete: (providerId: string, name: string) => invoke<void>("ollama_delete", { providerId, name }),
 
   cancel: (requestId: string) => invoke<void>("ai_cancel", { requestId }),
   generateQuiz: (

@@ -24,9 +24,6 @@ fn real_scan_and_index_library() {
     library::scan(&conn, &books_dir(), "test").unwrap();
     println!("rescan (cached) in {:?}", t.elapsed());
 
-    let mut idx = rusqlite::Connection::open_in_memory().unwrap();
-    idx.execute_batch("PRAGMA journal_mode=MEMORY").unwrap();
-    drop(idx);
     let dir = tempfile::tempdir().unwrap();
     let mut idx = index::open(&dir.path().join("i.sqlite")).unwrap();
     let mut failures = vec![];
@@ -109,4 +106,18 @@ async fn real_quiz_with_ollama() {
         .unwrap();
     let grade = quiz::to_grade(q, &g.value, serde_json::Value::Null);
     println!("\ngrading took {:?}\n{grade:#?}", start.elapsed());
+}
+
+#[test]
+#[ignore]
+fn real_catalog_for_this_machine() {
+    let sys = crate::models::system_info();
+    println!("{sys:#?}");
+    for m in crate::models::catalog_for(&sys, &Default::default()).models {
+        println!(
+            "{:<16} {:>5.1} GB need {:>5.1}  {:<8} q{}  ~{:>5.1} tok/s  ~{:>4}s/grade {}",
+            m.name, m.size_gb, m.memory_needed_gb, m.fit, m.quality, m.est_tokens_per_sec, m.est_grade_seconds,
+            if m.recommended { "★ recommended" } else { "" }
+        );
+    }
 }

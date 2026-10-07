@@ -409,6 +409,10 @@ pub async fn chat_stream(
         if json_mode {
             body["format"] = json!("json");
         }
+        // Thinking models spend minutes reasoning on a CPU before answering; our tasks don't need it.
+        if ollama_can_think(http, &t.provider.base_url, &t.model).await {
+            body["think"] = if t.model.starts_with("gpt-oss") { json!("low") } else { json!(false) };
+        }
         let resp = http
             .post(format!("{}/api/chat", t.provider.base_url))
             .json(&body)
@@ -509,6 +513,27 @@ pub async fn chat_stream(
 fn default_threads() -> u32 {
     let cores = std::thread::available_parallelism().map(|n| n.get() as u32).unwrap_or(4);
     (cores / 2).max(2)
+}
+
+/// Whether an Ollama model reports the "thinking" capability (cached per model).
+async fn ollama_can_think(http: &reqwest::Client, base_url: &str, model: &str) -> bool {
+    static CACHE: std::sync::OnceLock<std::sync::Mutex<HashMap<String, bool>>> = std::sync::OnceLock::new();
+    let cache = CACHE.get_or_init(Default::default);
+    let key = format!("{base_url}|{model}");
+    if let Some(v) = cache.lock().unwrap().get(&key) {
+        return *v;
+    }
+    let can = match http.post(format!("{base_url}/api/show")).json(&json!({ "model": model })).send().await {
+        Ok(r) if r.status().is_success() => r
+            .json::<Value>()
+            .await
+            .ok()
+            .and_then(|v| v["capabilities"].as_array().map(|c| c.iter().any(|x| x == "thinking")))
+            .unwrap_or(false),
+        _ => return false,
+    };
+    cache.lock().unwrap().insert(key, can);
+    can
 }
 
 /// Small models in JSON mode sometimes emit whitespace forever; stop early instead of waiting.

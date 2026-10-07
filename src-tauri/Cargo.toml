@@ -36,6 +36,7 @@ uuid = { version = "1", features = ["v4", "v7"] }
 chrono = { version = "0.4", features = ["serde"] }
 thiserror = "2"
 regex = "1"
+sysinfo = { version = "0.37", default-features = false, features = ["system"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 keyring = { version = "3", features = ["linux-native-sync-persistent", "crypto-rust"] }
