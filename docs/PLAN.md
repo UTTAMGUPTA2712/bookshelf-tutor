@@ -1,5 +1,7 @@
 # Bookshelf Tutor — Project Plan
 
+> Implementation notes and deliberate deviations from this plan are tracked in `docs/PROGRESS.md`.
+
 A local-first desktop app that turns this folder of programming books into a guided learning system:
 it figures out what you already know, builds a roadmap through the right books and chapters, quizzes
 you on what you read using the book's own text, gives a thorough AI review of every answer, and

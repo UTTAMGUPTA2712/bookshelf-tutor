@@ -33,6 +33,22 @@ Updated: 2026-10-07
 - [ ] macOS (M5) build
 - [ ] Keychain on the Mac / on Linux without GNOME Keyring
 
+## Deliberate differences from PLAN.md (don't "fix" these without asking)
+- Repo is `~/Desktop/Practice/bookshelf-tutor` (not `books/tutor/`); books stay in `~/Desktop/Practice/books`, not in git.
+- No localStorage at all — every bit of learner data is in `bookshelf.sqlite` via Rust (user's decision).
+- IPC types are hand-written in `src/ipc.ts` (no tauri-specta); keep them in sync with `commands.rs` by hand.
+- One `index.sqlite` for all books (not one DB per book); it is rebuildable and never exported.
+- Plain `Mutex<Connection>` (no r2d2 pool) and a small hand-written migration runner in `db.rs`.
+- Anthropic and Gemini go through their OpenAI-compatible endpoints for now.
+- No Zustand/Zod yet; TanStack Query + component state is enough so far.
+- `pdfium-render` 0.8 with `sync` feature, `reqwest` 0.12, `rusqlite` 0.37, `keyring` 3, `sysinfo` 0.37 —
+  pinned because newer majors changed APIs or need a newer Rust than this machine's 1.92.
+
+## The user
+- Machines: Linux desktop (15 GB RAM, 20 cores, no GPU) and a MacBook M5. Repo is private.
+- CPU spikes upset them: never run local models without asking; build with `nice -n 19`.
+- Prefers being shown a plan before big features, then "move ahead".
+
 ## Known issues
 - Chinese PDFs may render missing glyphs: pdf.js CMaps/standard fonts aren't bundled yet
 - Some outlines are noisy (e.g. Qt 4 book shows `toc.html` entries); front-matter entries appear as chapters
