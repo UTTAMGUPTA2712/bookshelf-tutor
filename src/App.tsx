@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   BookOpen,
+  BookOpenText,
   Gauge,
   History,
   Layers,
@@ -23,6 +24,8 @@ import SkillsPage from "./pages/Skills";
 import DashboardPage from "./pages/Dashboard";
 import CardsPage from "./pages/Cards";
 import InterviewsPage from "./pages/Interviews";
+import LessonsPage from "./pages/Lessons";
+import LessonPage from "./pages/LessonPage";
 import InterviewSessionPage from "./pages/InterviewSession";
 import RoadmapPage from "./pages/Roadmap";
 import AssessmentPage from "./pages/Assessment";
@@ -73,6 +76,7 @@ function Onboarding() {
 const nav = [
   { to: "/", label: "Today", icon: Sun },
   { to: "/library", label: "Library", icon: LibraryIcon },
+  { to: "/lessons", label: "Lessons", icon: BookOpenText },
   { to: "/cards", label: "Cards", icon: Layers },
   { to: "/interview", label: "Interview", icon: MessagesSquare },
   { to: "/skills", label: "Skills", icon: Gauge },
@@ -136,11 +140,13 @@ export default function App() {
         </nav>
         <div className="mt-auto px-4 py-3 text-[11px] text-muted">v{info.data.version}</div>
       </aside>
-      <main className="relative min-w-0 flex-1 overflow-hidden">
+      <main className="relative min-w-0 flex-1 overflow-clip">
         <Routes>
           <Route path="/" element={<DashboardPage />} />
           <Route path="/library" element={<LibraryPage />} />
           <Route path="/cards" element={<CardsPage />} />
+          <Route path="/lessons" element={<LessonsPage />} />
+          <Route path="/lesson/:fingerprint/:chapterIdx" element={<LessonPage />} />
           <Route path="/interview" element={<InterviewsPage />} />
           <Route path="/interview/:id" element={<InterviewSessionPage />} />
           <Route path="/book/:fingerprint" element={<ReaderPage />} />

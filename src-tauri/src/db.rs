@@ -170,6 +170,20 @@ const MIGRATIONS: &[&str] = &[
         deleted     INTEGER NOT NULL DEFAULT 0
     );
     "#,
+    // 5: teacher lessons per chapter (summary, glossary, topics with their lessons, as JSON)
+    r#"
+    CREATE TABLE lessons (
+        id            TEXT PRIMARY KEY,
+        fingerprint   TEXT NOT NULL,
+        chapter_id    TEXT NOT NULL,
+        chapter_title TEXT NOT NULL,
+        data          TEXT NOT NULL,
+        created_at    TEXT NOT NULL,
+        updated_at    TEXT NOT NULL,
+        device_id     TEXT NOT NULL,
+        deleted       INTEGER NOT NULL DEFAULT 0
+    );
+    "#,
 ];
 
 pub fn now() -> String {

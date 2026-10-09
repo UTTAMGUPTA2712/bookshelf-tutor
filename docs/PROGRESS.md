@@ -82,6 +82,18 @@ Updated: 2026-10-09
       confirm), Ollama context vs. plan size, valid JSON from the last "Try this model" (results now saved per PC)
 - [x] 39 Rust unit tests
 
+## Done — Teacher / lessons (added on request, not in PLAN.md) — 2026-10-09
+- [x] `lesson.rs`: per chapter, from the chapter's own text. Step 1: overview + concise summary (keywords in bold)
+      + glossary of every term with a page; long chapters are read in parts sized to the model's context and
+      combined. Step 2: the chapter's topics (with page ranges), each taught on demand as "in plain words" →
+      "in industry terms" → "in short", plus its terms (merged into the glossary)
+- [x] Glossary terms → review cards ("What is X?"), once per term
+- [x] Saved in the `lessons` table (migration 5, export v5) so a lesson written on one PC is ready on the other;
+      re-summarizing keeps already-taught topics with the same title
+- [x] UI: "Teach me" in the reader, Lessons page, lesson page with the two steps, "Teach all", prev/next chapter,
+      "Quiz me on this chapter" (opens the reader's quiz setup via `?quiz=1`); optional "Teacher" model role
+- [x] 42 Rust unit tests
+
 ## Not verified yet
 - [ ] Clicking through the whole UI (app launched; needs a manual pass by the user)
 - [ ] Quality with a 7B+ local model or a cloud model (only tested with qwen2.5-coder:1.5b — too weak to grade well)
@@ -123,6 +135,7 @@ Updated: 2026-10-09
 - [ ] A full skill test with a real model (needs a 7B+ local model or a cloud key; not run here — CPU rule)
 - [ ] Card quality from the review call with a real model
 - [ ] A real mock interview: does the model follow the probing rules and keep the persona? (prompt tuning likely)
+- [ ] A real lesson: summary/glossary completeness and the plain-vs-industry layers with a 7B+ model
 - [ ] Skills/Roadmap/Cards/Today pages and the reader "Card" button clicked through in the running app
 
 ## Next

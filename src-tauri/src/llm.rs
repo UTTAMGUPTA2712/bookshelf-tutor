@@ -166,6 +166,7 @@ pub const ROLES: &[(&str, &str)] = &[
     ("question", "Writing questions"),
     ("grade", "Grading & reviews"),
     ("interviewer", "Interviewer's voice (optional — uses the grading model if empty)"),
+    ("teacher", "Teaching & summaries (optional — uses the question model if empty)"),
 ];
 
 /// Runs on this machine (Ollama or a localhost server) rather than in the cloud.

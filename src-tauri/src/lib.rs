@@ -5,6 +5,7 @@ mod db;
 mod error;
 mod index;
 mod interview;
+mod lesson;
 mod library;
 mod llm;
 mod models;
@@ -156,6 +157,12 @@ pub fn run() {
             commands::interviews_list,
             commands::interview_get,
             commands::interview_delete,
+            commands::lesson_get,
+            commands::lesson_summarize,
+            commands::lesson_teach,
+            commands::lessons_list,
+            commands::lesson_delete,
+            commands::lesson_terms_to_cards,
             commands::export_progress,
             commands::import_preview,
             commands::import_apply,

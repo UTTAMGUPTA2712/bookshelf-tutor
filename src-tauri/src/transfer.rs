@@ -12,8 +12,9 @@ use crate::error::{AppError, AppResult};
 
 pub const FORMAT: &str = "bookshelf-tutor-export";
 /// 2: `attempts.topics`, `preferences` table. 3: `cards`, `reviews`, `reading_log`. 4: `interviews`.
+/// 5: `lessons`.
 /// Older files import fine (missing tables are skipped, missing columns take their defaults).
-pub const SCHEMA_VERSION: u32 = 4;
+pub const SCHEMA_VERSION: u32 = 5;
 
 struct Table {
     name: &'static str,
@@ -82,6 +83,12 @@ const TABLES: &[Table] = &[
             "model", "created_at", "updated_at", "device_id", "deleted",
         ],
         json_columns: &["setup", "questions", "transcript", "report", "topics", "model"],
+    },
+    Table {
+        name: "lessons",
+        key: "id",
+        columns: &["id", "fingerprint", "chapter_id", "chapter_title", "data", "created_at", "updated_at", "device_id", "deleted"],
+        json_columns: &["data"],
     },
     Table {
         name: "reading_log",

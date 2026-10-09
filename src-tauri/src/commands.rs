@@ -18,7 +18,7 @@ use crate::models::{self, CatalogView, LookupResult, PullProgress, SystemInfo};
 use crate::quiz::{self, Attempt, AttemptSummary, QuizOptions};
 use crate::transfer::{self, ImportMode, ImportPreview, TableChanges};
 use crate::skills::{self, Roadmap, SkillMap};
-use crate::{assessment, cards, db, interview, stats, AppState};
+use crate::{assessment, cards, db, interview, lesson, stats, AppState};
 
 // ---------- app & library ----------
 
@@ -1547,6 +1547,209 @@ pub fn interview_get(state: State<'_, AppState>, id: String) -> AppResult<interv
 #[tauri::command]
 pub fn interview_delete(state: State<'_, AppState>, id: String) -> AppResult<()> {
     interview::delete(&state.db(), &id, &state.device_id)
+}
+
+// ---------- teacher (lessons) ----------
+
+fn teacher_targets(conn: &rusqlite::Connection) -> AppResult<Vec<Target>> {
+    match llm::resolve_role(conn, "teacher") {
+        Ok(t) if !t.is_empty() => Ok(t),
+        _ => llm::resolve_role(conn, "question"),
+    }
+}
+
+/// Characters of book text per call, leaving room in a local model's context for a long reply.
+fn teaching_budget(t: &Target, reply_tokens: usize) -> usize {
+    if t.provider.adapter == "ollama" {
+        let ctx = t.provider.options.num_ctx.unwrap_or(8192) as usize;
+        ctx.saturating_sub(1200 + reply_tokens).max(1000) * 3
+    } else {
+        40_000
+    }
+}
+
+fn chapter_and_chunks(s: &AppState, fp: &str, chapter_idx: u32) -> AppResult<(pdf::Chapter, Vec<index::Chunk>)> {
+    let idx = s.index();
+    let chapter = index::chapters(&idx, fp)?
+        .into_iter()
+        .find(|c| c.idx == chapter_idx)
+        .ok_or_else(|| AppError::NotFound("Chapter not found — open the book once so the app can read it".into()))?;
+    let chunks = index::chapter_chunks(&idx, fp, chapter_idx)?;
+    if chunks.is_empty() {
+        return Err(AppError::Invalid("This chapter has no extractable text (it may be scanned images).".into()));
+    }
+    Ok((chapter, chunks))
+}
+
+#[tauri::command]
+pub fn lesson_get(state: State<'_, AppState>, fingerprint: String, chapter_idx: u32) -> AppResult<Option<lesson::Lesson>> {
+    let chapter = index::chapters(&state.index(), &fingerprint)?.into_iter().find(|c| c.idx == chapter_idx);
+    match chapter {
+        Some(c) => lesson::get(&state.db(), &lesson::lesson_id(&fingerprint, &c.id)),
+        None => Ok(None),
+    }
+}
+
+/// Step 1: summary, keywords and topics for a chapter (read in parts if it is long).
+#[tauri::command]
+pub async fn lesson_summarize(
+    state: State<'_, AppState>,
+    request_id: String,
+    fingerprint: String,
+    chapter_idx: u32,
+    on_event: Channel<StreamEvent>,
+) -> AppResult<lesson::Lesson> {
+    let s = state.inner().clone();
+    let (book, targets) = {
+        let db = s.db();
+        (library::get(&db, &fingerprint)?, teacher_targets(&db)?)
+    };
+    let (chapter, chunks) = chapter_and_chunks(&s, &fingerprint, chapter_idx)?;
+    const OUTLINE_TOKENS: u32 = 2200;
+    cancellable(&s.clone(), request_id, async move {
+        let (notes, target) = llm::with_fallback(&targets, |t| {
+            let parts = lesson::split_parts(&chunks, teaching_budget(&t, OUTLINE_TOKENS as usize));
+            let http = s.http.clone();
+            let ev = on_event.clone();
+            let (book_title, chapter_title) = (book.title.clone(), chapter.title.clone());
+            async move {
+                let mut notes = Vec::new();
+                for (i, part) in parts.iter().enumerate() {
+                    let _ = ev.send(StreamEvent::Status {
+                        message: if parts.len() == 1 {
+                            format!("Reading “{chapter_title}” with {}…", t.model)
+                        } else {
+                            format!("Reading part {} of {} with {}…", i + 1, parts.len(), t.model)
+                        },
+                    });
+                    let sources = quiz::label_sources(part);
+                    let messages = lesson::outline_messages(&book_title, &chapter_title, i, parts.len(), &sources);
+                    let mut sink = token_sink(ev.clone());
+                    let r = llm::chat_json::<lesson::OutlineOut>(&http, &t, messages, &lesson::validate_outline, OUTLINE_TOKENS, &mut sink).await?;
+                    notes.push(lesson::part_notes(&r.value, &sources));
+                }
+                Ok(notes)
+            }
+        })
+        .await?;
+        let combined = if notes.len() > 1 {
+            let _ = on_event.send(StreamEvent::Status { message: "Putting the summary together…".into() });
+            let messages = lesson::combine_messages(&chapter.title, &notes);
+            let mut sink = token_sink(on_event.clone());
+            match llm::chat_json::<lesson::CombineOut>(&s.http, &target, messages, &lesson::validate_combine, 1500, &mut sink).await {
+                Ok(r) => Some((
+                    r.value.overview.trim().to_string(),
+                    r.value.summary.iter().filter_map(|v| v.as_str()).map(lesson::bullet).filter(|v| !v.is_empty()).collect(),
+                )),
+                Err(AppError::Cancelled) => return Err(AppError::Cancelled),
+                Err(e) => {
+                    log::warn!("combining lesson parts failed, keeping part summaries: {e}");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        let info = lesson::ChapterInfo { fingerprint: &fingerprint, book_title: &book.title, chapter: &chapter };
+        let model = json!({ "writtenBy": target.describe(), "promptVersion": lesson::PROMPT_VERSION });
+        let mut l = lesson::build_lesson(&info, notes, combined, model);
+        let db = s.db();
+        // Re-summarizing keeps the topic lessons already written for topics with the same title.
+        if let Some(old) = lesson::get(&db, &l.id)? {
+            l.created_at = old.created_at;
+            for t in &mut l.topics {
+                if let Some(prev) = old.topics.iter().find(|o| o.title.eq_ignore_ascii_case(&t.title)) {
+                    t.lesson = prev.lesson.clone();
+                }
+            }
+        }
+        lesson::save(&db, &l, &s.device_id)?;
+        Ok(l)
+    })
+    .await
+}
+
+/// Step 2: teach one topic — in plain words, in industry terms, in short.
+#[tauri::command]
+pub async fn lesson_teach(
+    state: State<'_, AppState>,
+    request_id: String,
+    lesson_id: String,
+    topic_idx: usize,
+    on_event: Channel<StreamEvent>,
+) -> AppResult<lesson::Lesson> {
+    let s = state.inner().clone();
+    let (l, targets) = {
+        let db = s.db();
+        (lesson::require(&db, &lesson_id)?, teacher_targets(&db)?)
+    };
+    let topic = l.topics.get(topic_idx).cloned().ok_or_else(|| AppError::NotFound("Topic not found".into()))?;
+    let (_, chunks) = chapter_and_chunks(&s, &l.fingerprint, l.chapter_idx)?;
+    let relevant = lesson::topic_chunks(&chunks, &topic);
+    const TEACH_TOKENS: u32 = 2000;
+    cancellable(&s.clone(), request_id, async move {
+        let (taught, _) = llm::with_fallback(&targets, |t| {
+            let sources = quiz::label_sources(&index::select_context(&relevant, teaching_budget(&t, TEACH_TOKENS as usize)));
+            let messages = lesson::teach_messages(&l, &topic, &sources);
+            let http = s.http.clone();
+            let mut sink = token_sink(on_event.clone());
+            let ev = on_event.clone();
+            let title = topic.title.clone();
+            async move {
+                let _ = ev.send(StreamEvent::Status { message: format!("Teaching “{title}” with {}…", t.model) });
+                let r = llm::chat_json::<lesson::TeachOut>(&http, &t, messages, &lesson::validate_teach, TEACH_TOKENS, &mut sink).await?;
+                Ok(lesson::to_topic_lesson(&r.value, topic.page_start, json!({ "model": t.describe(), "promptVersion": lesson::PROMPT_VERSION })))
+            }
+        })
+        .await?;
+        let db = s.db();
+        let mut fresh = lesson::require(&db, &lesson_id)?;
+        if let Some(t) = fresh.topics.get_mut(topic_idx) {
+            t.lesson = Some(taught);
+            lesson::absorb_terms(&mut fresh, topic_idx);
+        }
+        fresh.updated_at = db::now();
+        lesson::save(&db, &fresh, &s.device_id)?;
+        Ok(fresh)
+    })
+    .await
+}
+
+#[tauri::command]
+pub fn lessons_list(state: State<'_, AppState>) -> AppResult<Vec<lesson::LessonSummary>> {
+    lesson::list(&state.db())
+}
+
+#[tauri::command]
+pub fn lesson_delete(state: State<'_, AppState>, id: String) -> AppResult<()> {
+    lesson::delete(&state.db(), &id, &state.device_id)
+}
+
+/// Turns glossary terms into review cards ("What is X?" → definition), skipping ones already made.
+#[tauri::command]
+pub fn lesson_terms_to_cards(state: State<'_, AppState>, lesson_id: String, terms: Vec<String>) -> AppResult<u32> {
+    let db = state.db();
+    let l = lesson::require(&db, &lesson_id)?;
+    let mut made = 0;
+    for name in terms {
+        let Some(t) = l.terms.iter().find(|t| t.term.eq_ignore_ascii_case(&name)) else { continue };
+        let key = format!("term:{}", t.term.to_lowercase());
+        if cards::exists(&db, &l.id, &key)? {
+            continue;
+        }
+        let card = cards::NewCard {
+            front: format!("What is **{}**?", t.term),
+            back: t.definition.clone(),
+            topic_id: None,
+            attempt_id: Some(l.id.clone()),
+            question_id: Some(key),
+            book_fingerprint: Some(l.fingerprint.clone()),
+            page: t.page,
+        };
+        cards::create(&db, &card, chrono::Utc::now(), &state.device_id)?;
+        made += 1;
+    }
+    Ok(made)
 }
 
 // ---------- export / import ----------

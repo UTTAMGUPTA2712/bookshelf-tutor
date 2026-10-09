@@ -1,7 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams, useSearchParams } from "react-router";
-import { ArrowLeft, CheckCircle2, GraduationCap, Layers, Minus, Plus, Search, X } from "lucide-react";
+import {
+  ArrowLeft,
+  BookOpenText,
+  CheckCircle2,
+  GraduationCap,
+  Layers,
+  Minus,
+  MoveHorizontal,
+  Plus,
+  Search,
+  X,
+} from "lucide-react";
 import type { PDFViewer as PDFViewerType } from "pdfjs-dist/web/pdf_viewer.mjs";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import { api, errorMessage, newRequestId, type Chapter, type QuizOptions } from "../ipc";
@@ -168,6 +179,10 @@ export default function ReaderPage() {
 
   const containerRef = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<PDFViewerType | null>(null);
+  // Typical page width in PDF points (not page 1: covers are often smaller than the rest).
+  const typicalWidth = useRef<number | null>(null);
+  // Follow the window width until the reader zooms by hand.
+  const fitMode = useRef(true);
   const [page, setPage] = useState(1);
   const [pageCount, setPageCount] = useState(0);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -225,9 +240,22 @@ export default function ReaderPage() {
         const viewer = new PDFViewer({ container, eventBus, linkService, removePageBorders: true });
         linkService.setViewer(viewer);
         viewerRef.current = viewer;
-        eventBus.on("pagesinit", () => {
-          viewer.currentScaleValue = "page-width";
-          viewer.currentPageNumber = Math.min(initialPage.current ?? 1, doc!.numPages);
+        eventBus.on("pagesinit", async () => {
+          const d = doc!;
+          const n = d.numPages;
+          const sample = [...new Set([2, 3, 4, 5, Math.floor(n / 3), Math.floor(n / 2), n - 1])].filter((p) => p >= 1 && p <= n);
+          try {
+            const widths = await Promise.all(
+              sample.map(async (p) => (await d.getPage(p)).getViewport({ scale: 1 }).width),
+            );
+            widths.sort((a, b) => a - b);
+            typicalWidth.current = widths[Math.floor(widths.length / 2)] || null;
+          } catch {
+            typicalWidth.current = null;
+          }
+          if (cancelled) return;
+          fitWidth();
+          viewer.currentPageNumber = Math.min(initialPage.current ?? 1, n);
           setLoading(false);
         });
         eventBus.on("pagechanging", (e: { pageNumber: number }) => setPage(e.pageNumber));
@@ -262,8 +290,40 @@ export default function ReaderPage() {
     if (viewerRef.current) viewerRef.current.currentPageNumber = p;
   }, []);
 
+  /** Scale so a typical page fills the width (falls back to pdf.js's own fit if sizes are unknown). */
+  function fitWidth() {
+    const v = viewerRef.current;
+    const container = containerRef.current;
+    if (!v || !container) return;
+    fitMode.current = true;
+    const w = typicalWidth.current;
+    if (!w) {
+      v.currentScaleValue = "page-width";
+      return;
+    }
+    const cssWidth = w * (96 / 72); // PDF points → CSS pixels at scale 1
+    v.currentScale = Math.min(4, Math.max(0.25, (container.clientWidth - 40) / cssWidth));
+  }
+
+  // Keep fitting the width when the window (or the search panel) changes size.
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    let t: ReturnType<typeof setTimeout> | undefined;
+    const ro = new ResizeObserver(() => {
+      clearTimeout(t);
+      t = setTimeout(() => fitMode.current && fitWidth(), 150);
+    });
+    ro.observe(container);
+    return () => {
+      clearTimeout(t);
+      ro.disconnect();
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const zoom = (dir: 1 | -1) => {
     const v = viewerRef.current;
+    fitMode.current = false;
     if (v) v.currentScale = Math.min(4, Math.max(0.3, v.currentScale * (dir > 0 ? 1.15 : 1 / 1.15)));
   };
 
@@ -278,11 +338,23 @@ export default function ReaderPage() {
     enabled: searchOpen && searchQ.trim().length >= 2 && !!status.data?.indexed,
   });
 
+  // Arriving from a lesson's "Quiz me": open the quiz for the chapter of the requested page.
+  const quizParam = useRef(params.get("quiz") === "1");
+  useEffect(() => {
+    if (!quizParam.current || !chapters.data) return;
+    const p = Number(params.get("page")) || 1;
+    const c = chapters.data.find((x) => p >= x.startPage && p <= x.endPage);
+    if (c) {
+      quizParam.current = false;
+      setQuizChapter(c);
+    }
+  }, [chapters.data]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const done = new Set(book?.progress?.chaptersDone ?? []);
   const scanned = status.data?.indexed && status.data.textPages < status.data.pageCount * 0.1;
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full flex-col overflow-clip">
       <header className="flex items-center gap-2 border-b border-line bg-panel px-3 py-2">
         <Button variant="ghost" onClick={() => navigate("/library")} aria-label="Back to library">
           <ArrowLeft className="size-4" />
@@ -301,6 +373,9 @@ export default function ReaderPage() {
           <Button variant="ghost" onClick={() => zoom(1)} aria-label="Zoom in">
             <Plus className="size-4" />
           </Button>
+          <Button variant="ghost" onClick={fitWidth} aria-label="Fit width" title="Fit width">
+            <MoveHorizontal className="size-4" />
+          </Button>
           <Button variant="ghost" onClick={() => setSearchOpen((o) => !o)} aria-label="Search in book">
             <Search className="size-4" />
           </Button>
@@ -313,6 +388,14 @@ export default function ReaderPage() {
             <Layers className="size-4" /> Card
           </Button>
           <Button
+            variant="ghost"
+            disabled={!currentChapter || !!scanned}
+            onClick={() => currentChapter && navigate(`/lesson/${fingerprint}/${currentChapter.idx}`)}
+            title="Summary with every keyword, then the chapter taught topic by topic"
+          >
+            <BookOpenText className="size-4" /> Teach me
+          </Button>
+          <Button
             variant="primary"
             disabled={!currentChapter || !!scanned}
             onClick={() => currentChapter && setQuizChapter(currentChapter)}
@@ -323,8 +406,8 @@ export default function ReaderPage() {
         </div>
       </header>
 
-      <div className="flex min-h-0 flex-1">
-        <aside className="w-64 shrink-0 overflow-y-auto border-r border-line bg-panel">
+      <div className="flex min-h-0 flex-1 overflow-clip">
+        <aside className="w-64 shrink-0 overflow-x-hidden overflow-y-auto border-r border-line bg-panel">
           <div className="px-3 pt-3 pb-1 text-xs font-semibold tracking-wide text-muted uppercase">Chapters</div>
           {status.isLoading && (
             <div className="px-3 py-2 text-xs text-muted">
@@ -369,7 +452,7 @@ export default function ReaderPage() {
           </ul>
         </aside>
 
-        <div className="relative min-w-0 flex-1 bg-sunken">
+        <div className="relative min-w-0 flex-1 overflow-clip bg-sunken">
           <div ref={containerRef} className="pdf-scroll">
             <div className="pdfViewer" />
           </div>

@@ -562,6 +562,48 @@ export interface InterviewSummary {
   createdAt: string;
 }
 
+export interface Term {
+  term: string;
+  definition: string;
+  page: number | null;
+}
+
+export interface LessonTopic {
+  title: string;
+  pageStart: number;
+  pageEnd: number;
+  lesson: { plain: string; industry: string; recap: string; terms: Term[]; createdAt: string } | null;
+}
+
+export interface Lesson {
+  id: string;
+  fingerprint: string;
+  chapterId: string;
+  chapterIdx: number;
+  chapterTitle: string;
+  bookTitle: string;
+  pageStart: number;
+  pageEnd: number;
+  overview: string;
+  summary: string[];
+  terms: Term[];
+  topics: LessonTopic[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface LessonSummary {
+  id: string;
+  fingerprint: string;
+  bookTitle: string;
+  chapterIdx: number;
+  chapterTitle: string;
+  terms: number;
+  topics: number;
+  topicsTaught: number;
+  updatedAt: string;
+}
+
 function channel<T>(onMessage?: (m: T) => void): Channel<T> {
   const ch = new Channel<T>();
   if (onMessage) ch.onmessage = onMessage;
@@ -668,6 +710,14 @@ export const api = {
     invoke<Interview>("interview_respond", { requestId, id, onEvent: channel(onEvent) }),
   finishInterview: (requestId: string, id: string, onEvent: (e: StreamEvent) => void) =>
     invoke<Interview>("interview_finish", { requestId, id, onEvent: channel(onEvent) }),
+  lesson: (fingerprint: string, chapterIdx: number) => invoke<Lesson | null>("lesson_get", { fingerprint, chapterIdx }),
+  summarizeChapter: (requestId: string, fingerprint: string, chapterIdx: number, onEvent: (e: StreamEvent) => void) =>
+    invoke<Lesson>("lesson_summarize", { requestId, fingerprint, chapterIdx, onEvent: channel(onEvent) }),
+  teachTopic: (requestId: string, lessonId: string, topicIdx: number, onEvent: (e: StreamEvent) => void) =>
+    invoke<Lesson>("lesson_teach", { requestId, lessonId, topicIdx, onEvent: channel(onEvent) }),
+  lessons: () => invoke<LessonSummary[]>("lessons_list"),
+  deleteLesson: (id: string) => invoke<void>("lesson_delete", { id }),
+  termsToCards: (lessonId: string, terms: string[]) => invoke<number>("lesson_terms_to_cards", { lessonId, terms }),
   interviewCheck: (minutes: number) => invoke<ModelCheck>("interview_check", { minutes }),
   interviews: () => invoke<InterviewSummary[]>("interviews_list"),
   interview: (id: string) => invoke<Interview>("interview_get", { id }),

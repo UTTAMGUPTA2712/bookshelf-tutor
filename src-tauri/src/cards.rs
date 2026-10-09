@@ -361,6 +361,18 @@ pub fn cards_for_mistakes(a: &Attempt, llm_cards: &[Value]) -> Vec<NewCard> {
     out
 }
 
+/// A card made from this source item (e.g. one glossary term of a lesson) already exists.
+pub fn exists(conn: &Connection, attempt_id: &str, question_id: &str) -> AppResult<bool> {
+    Ok(conn
+        .query_row(
+            "SELECT 1 FROM cards WHERE attempt_id = ?1 AND question_id = ?2 AND deleted = 0 LIMIT 1",
+            [attempt_id, question_id],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some())
+}
+
 pub fn has_cards_for(conn: &Connection, attempt_id: &str) -> AppResult<bool> {
     Ok(conn
         .query_row("SELECT 1 FROM cards WHERE attempt_id = ?1 LIMIT 1", [attempt_id], |_| Ok(()))
