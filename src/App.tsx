@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { BookOpen, Gauge, History, Library as LibraryIcon, Map as MapIcon, Settings as SettingsIcon } from "lucide-react";
+import { BookOpen, Gauge, History, Layers, Library as LibraryIcon, Map as MapIcon, Settings as SettingsIcon, Sun } from "lucide-react";
 import { NavLink, Route, Routes } from "react-router";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useState } from "react";
@@ -10,6 +10,8 @@ import ReaderPage from "./pages/Reader";
 import QuizPage from "./pages/Quiz";
 import HistoryPage from "./pages/History";
 import SkillsPage from "./pages/Skills";
+import DashboardPage from "./pages/Dashboard";
+import CardsPage from "./pages/Cards";
 import RoadmapPage from "./pages/Roadmap";
 import AssessmentPage from "./pages/Assessment";
 import SettingsPage from "./pages/Settings";
@@ -57,7 +59,9 @@ function Onboarding() {
 }
 
 const nav = [
-  { to: "/", label: "Library", icon: LibraryIcon },
+  { to: "/", label: "Today", icon: Sun },
+  { to: "/library", label: "Library", icon: LibraryIcon },
+  { to: "/cards", label: "Cards", icon: Layers },
   { to: "/skills", label: "Skills", icon: Gauge },
   { to: "/roadmap", label: "Roadmap", icon: MapIcon },
   { to: "/history", label: "Quizzes", icon: History },
@@ -66,6 +70,13 @@ const nav = [
 
 export default function App() {
   const info = useAppInfo();
+  const due = useQuery({
+    queryKey: ["cards", "due"],
+    queryFn: api.cardsDue,
+    enabled: !!info.data?.libraryRoot,
+    refetchInterval: 5 * 60_000,
+  });
+  const dueCount = due.data?.cards.length ?? 0;
 
   if (info.isLoading) {
     return (
@@ -102,6 +113,11 @@ export default function App() {
             >
               <Icon className="size-4" />
               {label}
+              {to === "/cards" && dueCount > 0 && (
+                <span className="ml-auto rounded-full bg-accent px-1.5 text-[10px] font-semibold text-accent-ink">
+                  {dueCount}
+                </span>
+              )}
             </NavLink>
           ))}
         </nav>
@@ -109,7 +125,9 @@ export default function App() {
       </aside>
       <main className="relative min-w-0 flex-1 overflow-hidden">
         <Routes>
-          <Route path="/" element={<LibraryPage />} />
+          <Route path="/" element={<DashboardPage />} />
+          <Route path="/library" element={<LibraryPage />} />
+          <Route path="/cards" element={<CardsPage />} />
           <Route path="/book/:fingerprint" element={<ReaderPage />} />
           <Route path="/quiz/:id" element={<QuizPage />} />
           <Route path="/history" element={<HistoryPage />} />

@@ -20,11 +20,11 @@ Full design: `docs/PLAN.md`. Current status and next steps: `docs/PROGRESS.md` �
 - `src-tauri/src/` — `db` (SQLite + migrations), `library` (scan, fingerprints, add/remove), `pdf` (pdfium, chapter
   detection), `index` (chunks + FTS5), `llm` (providers, roles, streaming, JSON repair), `quiz` (prompts, grounding,
   grading), `assessment` (adaptive skill test), `skills` (taxonomy, chapter→topic mapping, skill map, roadmap),
-  `transfer` (export/import/merge), `secrets` (OS keychain), `commands` (thin IPC layer)
+  `cards` (FSRS, review queue, cards from mistakes), `stats` (dashboard, reading time), `transfer` (export/import/merge), `secrets` (OS keychain), `commands` (thin IPC layer)
 - `src-tauri/resources/` — `books.json` (curated metadata for known books), `providers.json` (provider presets),
   `taxonomy.json` (topic graphs per track; prereqs must be listed before the topics that need them)
 - `src/ipc.ts` — typed wrappers for every Rust command; keep in sync with `commands.rs`
-- `src/pages/` — Library, Reader, Quiz, History, Skills, Assessment, Roadmap, Settings
+- `src/pages/` — Dashboard (home), Library, Reader, Quiz, History, Skills, Assessment, Roadmap, Cards, Settings
 
 ## Rules
 - All learner data lives in `bookshelf.sqlite` (Rust). The frontend stores nothing (no localStorage).

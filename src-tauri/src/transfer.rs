@@ -11,8 +11,9 @@ use crate::db::now;
 use crate::error::{AppError, AppResult};
 
 pub const FORMAT: &str = "bookshelf-tutor-export";
-/// 2: `attempts.topics`, `preferences` table. Older files import fine (missing columns take their defaults).
-pub const SCHEMA_VERSION: u32 = 2;
+/// 2: `attempts.topics`, `preferences` table. 3: `cards`, `reviews`, `reading_log`.
+/// Older files import fine (missing tables are skipped, missing columns take their defaults).
+pub const SCHEMA_VERSION: u32 = 3;
 
 struct Table {
     name: &'static str,
@@ -58,6 +59,27 @@ const TABLES: &[Table] = &[
         json_columns: &["model", "questions", "overall", "topics"],
     },
     Table { name: "preferences", key: "key", columns: &["key", "value", "updated_at", "device_id"], json_columns: &[] },
+    Table {
+        name: "cards",
+        key: "id",
+        columns: &[
+            "id", "front", "back", "topic_id", "attempt_id", "question_id", "book_fingerprint", "page", "due", "stability",
+            "difficulty", "reps", "lapses", "state", "last_review", "created_at", "updated_at", "device_id", "deleted",
+        ],
+        json_columns: &[],
+    },
+    Table {
+        name: "reviews",
+        key: "id",
+        columns: &["id", "card_id", "rating", "state", "interval_days", "reviewed_at", "updated_at", "device_id"],
+        json_columns: &[],
+    },
+    Table {
+        name: "reading_log",
+        key: "id",
+        columns: &["id", "fingerprint", "day", "minutes", "updated_at", "device_id"],
+        json_columns: &[],
+    },
 ];
 
 #[derive(Debug, Serialize, Deserialize)]

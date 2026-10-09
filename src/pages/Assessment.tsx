@@ -267,6 +267,8 @@ export default function AssessmentPage() {
     qc.invalidateQueries({ queryKey: ["attempts"] });
     qc.invalidateQueries({ queryKey: ["skills"] });
     qc.invalidateQueries({ queryKey: ["roadmap"] });
+    qc.invalidateQueries({ queryKey: ["dashboard"] });
+    qc.invalidateQueries({ queryKey: ["cards"] });
   };
 
   return (

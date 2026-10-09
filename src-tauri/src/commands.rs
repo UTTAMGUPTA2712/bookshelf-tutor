@@ -18,7 +18,7 @@ use crate::models::{self, CatalogView, LookupResult, PullProgress, SystemInfo};
 use crate::quiz::{self, Attempt, AttemptSummary, QuizOptions};
 use crate::transfer::{self, ImportMode, ImportPreview, TableChanges};
 use crate::skills::{self, Roadmap, SkillMap};
-use crate::{assessment, db, AppState};
+use crate::{assessment, cards, db, stats, AppState};
 
 // ---------- app & library ----------
 
@@ -592,7 +592,7 @@ pub async fn quiz_finish(
                 let http = s.http.clone();
                 let mut sink = token_sink(on_event.clone());
                 async move {
-                    llm::chat_json::<quiz::SummaryOut>(&http, &t, messages, &quiz::validate_summary, 800, &mut sink).await
+                    llm::chat_json::<quiz::SummaryOut>(&http, &t, messages, &quiz::validate_summary, 1600, &mut sink).await
                 }
             })
             .await
@@ -601,6 +601,16 @@ pub async fn quiz_finish(
         };
         let overall = quiz::to_overall(&a.questions, summary.as_ref());
         let db = s.db();
+        // Mistakes become review cards, due tomorrow (once per quiz; regrading doesn't add more).
+        if a.kind == "chapter" && !cards::has_cards_for(&db, &a.id)? {
+            let llm_cards = summary.as_ref().map(|s| s.cards.as_slice()).unwrap_or_default();
+            let due = cards::tomorrow_start();
+            for c in cards::cards_for_mistakes(&a, llm_cards) {
+                if let Err(e) = cards::create(&db, &c, due, &s.device_id) {
+                    log::warn!("card not created: {e}");
+                }
+            }
+        }
         if overall.score >= 70 {
             if let (Some(fp), Some(ch)) = (&a.book_fingerprint, &a.chapter_id) {
                 let patch = ProgressPatch { last_page: None, status: None, chapter_done: Some(ch.clone()), chapter_undone: None };
@@ -857,6 +867,7 @@ pub async fn roadmap_prepare(
 pub struct Prefs {
     goal_track: Option<String>,
     weekly_pace: u32,
+    daily_cards: u32,
 }
 
 #[tauri::command]
@@ -865,11 +876,17 @@ pub fn prefs_get(state: State<'_, AppState>) -> AppResult<Prefs> {
     Ok(Prefs {
         goal_track: db::get_pref(&db, "goal_track")?,
         weekly_pace: db::get_pref(&db, "weekly_pace")?.and_then(|p| p.parse().ok()).unwrap_or(3),
+        daily_cards: daily_limit(&db)?,
     })
 }
 
 #[tauri::command]
-pub fn prefs_set(state: State<'_, AppState>, goal_track: Option<String>, weekly_pace: Option<u32>) -> AppResult<Prefs> {
+pub fn prefs_set(
+    state: State<'_, AppState>,
+    goal_track: Option<String>,
+    weekly_pace: Option<u32>,
+    daily_cards: Option<u32>,
+) -> AppResult<Prefs> {
     {
         let db = state.db();
         if let Some(t) = goal_track {
@@ -879,8 +896,156 @@ pub fn prefs_set(state: State<'_, AppState>, goal_track: Option<String>, weekly_
         if let Some(p) = weekly_pace {
             db::set_pref(&db, "weekly_pace", &p.clamp(1, 20).to_string(), &state.device_id)?;
         }
+        if let Some(n) = daily_cards {
+            db::set_pref(&db, "daily_cards", &n.clamp(5, 500).to_string(), &state.device_id)?;
+        }
     }
     prefs_get(state)
+}
+
+// ---------- cards ----------
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CardView {
+    #[serde(flatten)]
+    card: cards::Card,
+    /// Wait after Again / Hard / Good / Easy, e.g. ["10m", "1d", "3d", "16d"].
+    preview: [String; 4],
+}
+
+fn card_view(card: cards::Card) -> CardView {
+    let preview = cards::preview(&card.schedule, chrono::Utc::now());
+    CardView { card, preview }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DueQueue {
+    cards: Vec<CardView>,
+    /// All cards due now (the queue itself is capped by the daily limit).
+    due_now: u32,
+    daily_limit: u32,
+}
+
+fn daily_limit(conn: &rusqlite::Connection) -> AppResult<u32> {
+    Ok(db::get_pref(conn, "daily_cards")?.and_then(|p| p.parse().ok()).unwrap_or(50))
+}
+
+#[tauri::command]
+pub fn cards_due(state: State<'_, AppState>) -> AppResult<DueQueue> {
+    let db = state.db();
+    let now = chrono::Utc::now();
+    let limit = daily_limit(&db)?;
+    let reviewed_today: u32 = {
+        let start = chrono::Local::now().date_naive().and_hms_opt(0, 0, 0).expect("valid time");
+        let start = start.and_local_timezone(chrono::Local).earliest().map(|t| t.with_timezone(&chrono::Utc)).unwrap_or(now);
+        db.query_row(
+            "SELECT COUNT(DISTINCT card_id) FROM reviews WHERE reviewed_at >= ?1",
+            [start.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)],
+            |r| r.get(0),
+        )?
+    };
+    let remaining = limit.saturating_sub(reviewed_today);
+    Ok(DueQueue {
+        cards: cards::due(&db, now, remaining)?.into_iter().map(card_view).collect(),
+        due_now: cards::count_due(&db, now)?,
+        daily_limit: limit,
+    })
+}
+
+#[tauri::command]
+pub fn card_review(state: State<'_, AppState>, id: String, rating: u8) -> AppResult<CardView> {
+    cards::review(&state.db(), &id, rating, chrono::Utc::now(), &state.device_id).map(card_view)
+}
+
+#[tauri::command]
+pub fn cards_list(state: State<'_, AppState>, query: Option<String>) -> AppResult<Vec<CardView>> {
+    let q = query.filter(|q| !q.trim().is_empty());
+    Ok(cards::list(&state.db(), q.as_deref())?.into_iter().map(card_view).collect())
+}
+
+/// Manual cards (e.g. from text selected in the reader) are due right away.
+#[tauri::command]
+pub fn card_create(state: State<'_, AppState>, card: cards::NewCard) -> AppResult<CardView> {
+    let db = state.db();
+    let id = cards::create(&db, &card, chrono::Utc::now(), &state.device_id)?;
+    cards::get(&db, &id).map(card_view)
+}
+
+#[tauri::command]
+pub fn card_update(state: State<'_, AppState>, id: String, front: String, back: String) -> AppResult<CardView> {
+    cards::update_text(&state.db(), &id, &front, &back, &state.device_id).map(card_view)
+}
+
+#[tauri::command]
+pub fn card_delete(state: State<'_, AppState>, id: String) -> AppResult<()> {
+    cards::delete(&state.db(), &id, &state.device_id)
+}
+
+// ---------- reading time & dashboard ----------
+
+#[tauri::command]
+pub fn reading_tick(state: State<'_, AppState>, fingerprint: String, minutes: u32) -> AppResult<()> {
+    stats::log_reading(&state.db(), &fingerprint, minutes, chrono::Local::now().fixed_offset(), &state.device_id)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WeakTopic {
+    id: String,
+    label: String,
+    mastery: u32,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Dashboard {
+    #[serde(flatten)]
+    stats: stats::Stats,
+    goal_track: String,
+    goal_label: String,
+    weak_topics: Vec<WeakTopic>,
+    untested_topics: usize,
+    next_step: Option<skills::WeekItem>,
+    daily_limit: u32,
+}
+
+#[tauri::command]
+pub async fn dashboard_get(state: State<'_, AppState>) -> AppResult<Dashboard> {
+    let s = state.inner().clone();
+    blocking(move || {
+        let (attempts, books, goal, pace, stats, limit) = {
+            let db = s.db();
+            let attempts = quiz::all(&db)?;
+            let stats = stats::compute(&db, &attempts, chrono::Local::now().fixed_offset())?;
+            let goal = db::get_pref(&db, "goal_track")?.unwrap_or_else(|| "fundamentals".into());
+            let pace = db::get_pref(&db, "weekly_pace")?.and_then(|p| p.parse().ok()).unwrap_or(3);
+            (attempts, library::list(&db)?, goal, pace, stats, daily_limit(&db)?)
+        };
+        let track = skills::track(&goal).or_else(|_| skills::track("fundamentals"))?;
+        let map = skills::skill_map(&track.id, &attempts)?;
+        let mut weak: Vec<WeakTopic> = map
+            .topics
+            .iter()
+            .filter_map(|t| Some(WeakTopic { id: t.id.clone(), label: t.label.clone(), mastery: t.mastery? }))
+            .filter(|t| t.mastery < 75)
+            .collect();
+        weak.sort_by_key(|t| t.mastery);
+        weak.truncate(5);
+        let (chapters, needs_index) = skills::chapter_index(&s.index(), track, &books)?;
+        let roadmap = skills::roadmap(&track.id, &attempts, &books, &chapters, needs_index, pace)?;
+        Ok(Dashboard {
+            stats,
+            goal_track: track.id.clone(),
+            goal_label: track.label.clone(),
+            untested_topics: map.topics.iter().filter(|t| t.mastery.is_none()).count(),
+            weak_topics: weak,
+            next_step: roadmap.weeks.first().and_then(|w| w.items.first().cloned()),
+            daily_limit: limit,
+        })
+    })
+    .await
 }
 
 // ---------- export / import ----------

@@ -194,6 +194,15 @@ export function Review({ attempt, setAttempt }: { attempt: Attempt; setAttempt: 
               <PageLinks fingerprint={attempt.bookFingerprint} pages={o.rereadPages} />
             </div>
           )}
+          {attempt.kind === "chapter" && attempt.questions.some((q) => q.grade && q.grade.score < 80) && (
+            <p className="mt-3 text-xs text-muted">
+              The questions you missed are now{" "}
+              <Link to="/cards" className="text-accent hover:underline">
+                review cards
+              </Link>
+              , first due tomorrow.
+            </p>
+          )}
         </section>
       )}
       <ErrorNote error={error} />
@@ -401,6 +410,8 @@ export default function QuizPage() {
     qc.invalidateQueries({ queryKey: ["books"] });
     qc.invalidateQueries({ queryKey: ["skills"] });
     qc.invalidateQueries({ queryKey: ["roadmap"] });
+    qc.invalidateQueries({ queryKey: ["dashboard"] });
+    qc.invalidateQueries({ queryKey: ["cards"] });
   };
 
   return (

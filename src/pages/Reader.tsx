@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams, useSearchParams } from "react-router";
-import { ArrowLeft, CheckCircle2, GraduationCap, Minus, Plus, Search, X } from "lucide-react";
+import { ArrowLeft, CheckCircle2, GraduationCap, Layers, Minus, Plus, Search, X } from "lucide-react";
 import type { PDFViewer as PDFViewerType } from "pdfjs-dist/web/pdf_viewer.mjs";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import { api, errorMessage, newRequestId, type Chapter, type QuizOptions } from "../ipc";
 import { pdfjsLib, viewerModule } from "../pdf";
 import { useBooks } from "./Library";
 import { StreamBox } from "../components/StreamBox";
+import { CardEditor } from "./Cards";
 import { Badge, Button, ErrorNote, Field, inputClass, Modal, Spinner } from "../ui";
 
 function useIndexedChapters(fingerprint: string) {
@@ -174,6 +175,26 @@ export default function ReaderPage() {
   const [quizChapter, setQuizChapter] = useState<Chapter | null>(null);
   const [searchQ, setSearchQ] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
+  const [cardDraft, setCardDraft] = useState<{ back: string; page: number } | null>(null);
+
+  // Reading time: one minute per minute the window is visible and you've scrolled/moved/typed recently.
+  useEffect(() => {
+    let lastActive = Date.now();
+    const mark = () => {
+      lastActive = Date.now();
+    };
+    const events = ["scroll", "wheel", "mousemove", "keydown"] as const;
+    events.forEach((e) => window.addEventListener(e, mark, { capture: true, passive: true }));
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible" && Date.now() - lastActive < 120_000) {
+        api.readingTick(fingerprint, 1).catch(() => {});
+      }
+    }, 60_000);
+    return () => {
+      clearInterval(timer);
+      events.forEach((e) => window.removeEventListener(e, mark, { capture: true }));
+    };
+  }, [fingerprint]);
 
   const saveProgress = useMutation({
     mutationFn: (p: { lastPage?: number; chapterDone?: string; chapterUndone?: string }) => api.saveProgress(fingerprint, p),
@@ -263,7 +284,7 @@ export default function ReaderPage() {
   return (
     <div className="flex h-full flex-col">
       <header className="flex items-center gap-2 border-b border-line bg-panel px-3 py-2">
-        <Button variant="ghost" onClick={() => navigate("/")} aria-label="Back to library">
+        <Button variant="ghost" onClick={() => navigate("/library")} aria-label="Back to library">
           <ArrowLeft className="size-4" />
         </Button>
         <div className="min-w-0">
@@ -282,6 +303,14 @@ export default function ReaderPage() {
           </Button>
           <Button variant="ghost" onClick={() => setSearchOpen((o) => !o)} aria-label="Search in book">
             <Search className="size-4" />
+          </Button>
+          <Button
+            variant="ghost"
+            title="Make a review card (select text in the page first to use it as the answer)"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => setCardDraft({ back: window.getSelection()?.toString().trim() ?? "", page })}
+          >
+            <Layers className="size-4" /> Card
           </Button>
           <Button
             variant="primary"
@@ -401,6 +430,12 @@ export default function ReaderPage() {
         )}
       </div>
 
+      {cardDraft && (
+        <CardEditor
+          initial={{ front: "", back: cardDraft.back, bookFingerprint: fingerprint, page: cardDraft.page }}
+          onClose={() => setCardDraft(null)}
+        />
+      )}
       {quizChapter && <QuizSetup fingerprint={fingerprint} chapter={quizChapter} onClose={() => setQuizChapter(null)} />}
     </div>
   );

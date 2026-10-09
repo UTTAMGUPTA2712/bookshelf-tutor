@@ -1,4 +1,5 @@
 mod assessment;
+mod cards;
 mod commands;
 mod db;
 mod error;
@@ -10,6 +11,7 @@ mod pdf;
 mod quiz;
 mod secrets;
 mod skills;
+mod stats;
 mod transfer;
 
 #[cfg(test)]
@@ -136,6 +138,14 @@ pub fn run() {
             commands::roadmap_prepare,
             commands::prefs_get,
             commands::prefs_set,
+            commands::cards_due,
+            commands::card_review,
+            commands::cards_list,
+            commands::card_create,
+            commands::card_update,
+            commands::card_delete,
+            commands::reading_tick,
+            commands::dashboard_get,
             commands::export_progress,
             commands::import_preview,
             commands::import_apply,

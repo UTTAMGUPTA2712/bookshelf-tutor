@@ -369,7 +369,7 @@ export interface Week {
   number: number;
   starts: string;
   pages: number;
-  items: { topicId: string; topicLabel: string; book: BookRef; chapter: StepChapter }[];
+  items: WeekItem[];
 }
 
 export interface Roadmap {
@@ -385,6 +385,65 @@ export interface Roadmap {
 export interface Prefs {
   goalTrack: string | null;
   weeklyPace: number;
+  dailyCards: number;
+}
+
+export interface Card {
+  id: string;
+  front: string;
+  back: string;
+  topicId: string | null;
+  attemptId: string | null;
+  bookFingerprint: string | null;
+  bookTitle: string | null;
+  page: number | null;
+  due: string;
+  stability: number;
+  difficulty: number;
+  reps: number;
+  lapses: number;
+  state: "new" | "learning" | "review" | "relearning";
+  lastReview: string | null;
+  createdAt: string;
+  /** Wait after Again / Hard / Good / Easy. */
+  preview: [string, string, string, string];
+}
+
+export interface NewCard {
+  front: string;
+  back: string;
+  topicId?: string | null;
+  bookFingerprint?: string | null;
+  page?: number | null;
+}
+
+export interface DueQueue {
+  cards: Card[];
+  dueNow: number;
+  dailyLimit: number;
+}
+
+export interface WeekItem {
+  topicId: string;
+  topicLabel: string;
+  book: BookRef;
+  chapter: StepChapter;
+}
+
+export interface Dashboard {
+  cards: { dueNow: number; dueTomorrow: number; total: number; reviewedToday: number };
+  streak: { current: number; longest: number; activeToday: boolean };
+  activity: { day: string; quizzes: number; reviews: number; minutes: number }[];
+  scoreTrend: { id: string; date: string; score: number; title: string }[];
+  reading: { today: number; week: number; total: number };
+  books: { fingerprint: string; title: string; lastPage: number; pageCount: number | null; chaptersDone: number; minutes: number }[];
+  usage: { provider: string; model: string; calls: number; promptTokens: number; completionTokens: number }[];
+  goalTrack: string;
+  goalLabel: string;
+  weakTopics: { id: string; label: string; mastery: number }[];
+  untestedTopics: number;
+  nextStep: WeekItem | null;
+  dailyLimit: number;
 }
 
 function channel<T>(onMessage?: (m: T) => void): Channel<T> {
@@ -468,8 +527,21 @@ export const api = {
   prepareRoadmap: (track: string, onProgress: (p: { done: number; total: number; title: string }) => void) =>
     invoke<string[]>("roadmap_prepare", { track, onProgress: channel(onProgress) }),
   prefs: () => invoke<Prefs>("prefs_get"),
-  setPrefs: (p: { goalTrack?: string; weeklyPace?: number }) =>
-    invoke<Prefs>("prefs_set", { goalTrack: p.goalTrack ?? null, weeklyPace: p.weeklyPace ?? null }),
+  setPrefs: (p: { goalTrack?: string; weeklyPace?: number; dailyCards?: number }) =>
+    invoke<Prefs>("prefs_set", {
+      goalTrack: p.goalTrack ?? null,
+      weeklyPace: p.weeklyPace ?? null,
+      dailyCards: p.dailyCards ?? null,
+    }),
+
+  cardsDue: () => invoke<DueQueue>("cards_due"),
+  reviewCard: (id: string, rating: 1 | 2 | 3 | 4) => invoke<Card>("card_review", { id, rating }),
+  cards: (query?: string) => invoke<Card[]>("cards_list", { query: query ?? null }),
+  createCard: (card: NewCard) => invoke<Card>("card_create", { card }),
+  updateCard: (id: string, front: string, back: string) => invoke<Card>("card_update", { id, front, back }),
+  deleteCard: (id: string) => invoke<void>("card_delete", { id }),
+  readingTick: (fingerprint: string, minutes: number) => invoke<void>("reading_tick", { fingerprint, minutes }),
+  dashboard: () => invoke<Dashboard>("dashboard_get"),
 
   exportProgress: (path: string) => invoke<void>("export_progress", { path }),
   importPreview: (path: string) => invoke<ImportPreview>("import_preview", { path }),

@@ -491,24 +491,32 @@ pub fn overall_score(qs: &[Question]) -> u32 {
 }
 
 pub fn summary_messages(chapter_title: &str, qs: &[Question]) -> Vec<Message> {
-    let system = r#"You are a tutor writing a short, concrete review of a student's quiz on one chapter of a technical book. Be honest and encouraging.
+    let system = r#"You are a tutor writing a short, concrete review of a student's quiz on one chapter of a technical book (or a skill test). Be honest and encouraging.
+
+Also write flashcards for the questions the student missed (marked "MISSED"): 1-2 cards per missed question, each testing ONE atomic fact the student got wrong or left out. "front" is a short question, "back" a short correct answer (1-2 sentences). "q" is the question number. No cards for questions answered correctly.
 
 Reply with a JSON object only, exactly in this shape:
-{"summary":"2-4 sentences","strengths":["..."],"focus_next":["specific concepts to study next"],"next_step":"move_on|review_weak_spots|reread_chapter"}"#;
+{"summary":"2-4 sentences","strengths":["..."],"focus_next":["specific concepts to study next"],"next_step":"move_on|review_weak_spots|reread_chapter","cards":[{"q":1,"front":"...","back":"..."}]}"#;
     let lines = qs
         .iter()
         .enumerate()
         .map(|(i, q)| {
             let g = q.grade.as_ref();
-            format!(
-                "{}. [{} {}] {}\n   Missing: {}\n   Misconceptions: {}",
+            let missed = g.is_some_and(|g| g.score < crate::cards::MISTAKE_BELOW);
+            let mut line = format!(
+                "{}. [{}{} {}] {}\n   Missing: {}\n   Misconceptions: {}",
                 i + 1,
+                if missed { "MISSED, " } else { "" },
                 g.map(|g| g.verdict.as_str()).unwrap_or("unanswered"),
                 g.map(|g| g.score).unwrap_or(0),
                 q.prompt,
                 g.map(|g| g.missing_points.join("; ")).unwrap_or_default(),
                 g.map(|g| g.misconceptions.join("; ")).unwrap_or_default(),
-            )
+            );
+            if missed {
+                line.push_str(&format!("\n   Correct answer: {}", q.reference_answer.trim()));
+            }
+            line
         })
         .collect::<Vec<_>>()
         .join("\n");
@@ -526,6 +534,9 @@ pub struct SummaryOut {
     pub focus_next: Vec<Value>,
     #[serde(default)]
     pub next_step: String,
+    /// Flashcards for missed questions: `{"q": 1, "front": "...", "back": "..."}`.
+    #[serde(default)]
+    pub cards: Vec<Value>,
 }
 
 pub fn validate_summary(s: &SummaryOut) -> Result<(), String> {

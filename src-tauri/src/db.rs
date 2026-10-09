@@ -101,6 +101,55 @@ const MIGRATIONS: &[&str] = &[
         device_id  TEXT NOT NULL
     );
     "#,
+    // 3: spaced-repetition cards (FSRS state inline), their review log, and reading time per book/day/device
+    r#"
+    CREATE TABLE cards (
+        id               TEXT PRIMARY KEY,
+        front            TEXT NOT NULL,
+        back             TEXT NOT NULL,
+        topic_id         TEXT,
+        attempt_id       TEXT,
+        question_id      TEXT,
+        book_fingerprint TEXT,
+        page             INTEGER,
+        due              TEXT NOT NULL,
+        stability        REAL NOT NULL DEFAULT 0,
+        difficulty       REAL NOT NULL DEFAULT 0,
+        reps             INTEGER NOT NULL DEFAULT 0,
+        lapses           INTEGER NOT NULL DEFAULT 0,
+        state            TEXT NOT NULL DEFAULT 'new',
+        last_review      TEXT,
+        created_at       TEXT NOT NULL,
+        updated_at       TEXT NOT NULL,
+        device_id        TEXT NOT NULL,
+        deleted          INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX cards_due ON cards(deleted, due);
+    CREATE INDEX cards_attempt ON cards(attempt_id);
+
+    -- Append-only.
+    CREATE TABLE reviews (
+        id            TEXT PRIMARY KEY,
+        card_id       TEXT NOT NULL,
+        rating        INTEGER NOT NULL,
+        state         TEXT NOT NULL,
+        interval_days REAL NOT NULL,
+        reviewed_at   TEXT NOT NULL,
+        updated_at    TEXT NOT NULL,
+        device_id     TEXT NOT NULL
+    );
+    CREATE INDEX reviews_card ON reviews(card_id, reviewed_at);
+
+    -- One row per device, book and local day (id = device:fingerprint:day), so merges never conflict.
+    CREATE TABLE reading_log (
+        id          TEXT PRIMARY KEY,
+        fingerprint TEXT NOT NULL,
+        day         TEXT NOT NULL,
+        minutes     INTEGER NOT NULL,
+        updated_at  TEXT NOT NULL,
+        device_id   TEXT NOT NULL
+    );
+    "#,
 ];
 
 pub fn now() -> String {

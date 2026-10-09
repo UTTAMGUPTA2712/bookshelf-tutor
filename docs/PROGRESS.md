@@ -42,6 +42,20 @@ Updated: 2026-10-09
 - [x] Synced `preferences` table (goal track, weekly pace); export format v2 (v1 files still import)
 - [x] 27 Rust unit tests (+ `real_topic_mapping` ignored test)
 
+## Done — Phase 5 (cards + dashboard) — 2026-10-09
+- [x] Cards (`cards.rs`, migration 3): FSRS-5 scheduler (default weights, 90% target recall, day granularity,
+      "Again" = 10 min), review log, daily limit (synced pref `daily_cards`, default 50)
+- [x] Missed quiz questions (score < 80) become cards due at the start of the next local day. The review-summary model
+      call also writes 1–2 atomic cards per miss; plain question/answer cards are the fallback. Once per quiz.
+- [x] Manual cards: "Card" button in the reader (selected text becomes the answer, linked to the page) and "New card"
+- [x] Cards page: review with Space / 1–4 keys and interval previews; browse, search, edit, delete; due badge in nav
+- [x] Reading time: reader heartbeat (1 min per active, visible minute) into `reading_log` (one row per device/book/day)
+- [x] "Today" dashboard (now the home page; Library moved to `/library`): cards due, next roadmap chapter, streak,
+      reading time, 12-week activity grid, quiz score trend, weakest topics, books in progress, AI usage per model
+- [x] Export format v3 (cards, reviews, reading log). Test: dashboard numbers identical after export → merge, and
+      reading from two devices adds up
+- [x] 31 Rust unit tests
+
 ## Not verified yet
 - [ ] Clicking through the whole UI (app launched; needs a manual pass by the user)
 - [ ] Quality with a 7B+ local model or a cloud model (only tested with qwen2.5-coder:1.5b — too weak to grade well)
@@ -61,6 +75,11 @@ Updated: 2026-10-09
 - Skill-test questions come from the model's general knowledge (no book excerpts), graded against reference answer +
   key points. Chapter quizzes stay grounded in the book text.
 - Roadmap never indexes books by itself; the "Find chapters" button does it on request (CPU).
+- FSRS is implemented in `cards.rs` (FSRS-5 formulas, default weights) instead of the `rs-fsrs` crate; no
+  optimizer, no minute-level learning steps.
+- Cards are only made from chapter-quiz mistakes, not from skill-test mistakes.
+- AI usage is computed from tokens recorded on attempts (question writing + grading); no cost estimate yet, and the
+  skill-test question writing isn't counted. The "AI check" (type the answer) card mode is not built.
 - `pdfium-render` 0.8 with `sync` feature, `reqwest` 0.12, `rusqlite` 0.37, `keyring` 3, `sysinfo` 0.37 —
   pinned because newer majors changed APIs or need a newer Rust than this machine's 1.92.
 
@@ -74,12 +93,13 @@ Updated: 2026-10-09
 - Some outlines are noisy (e.g. Qt 4 book shows `toc.html` entries); front-matter entries appear as chapters
 - Chapter start from running headers can be one page late (first page of a chapter often has no header)
 
-## Not verified yet (Phase 4)
+## Not verified yet (Phases 4–5)
 - [ ] A full skill test with a real model (needs a 7B+ local model or a cloud key; not run here — CPU rule)
-- [ ] Skills/Roadmap pages clicked through in the running app
+- [ ] Card quality from the review call with a real model
+- [ ] Skills/Roadmap/Cards/Today pages and the reader "Card" button clicked through in the running app
 
 ## Next
-1. User test pass (incl. Phase 4) → fix what feels wrong
-2. Spaced-repetition cards from mistakes + dashboard (Phase 5)
-4. Native Anthropic/Gemini adapters, usage/cost view, embeddings + hybrid search
-5. Packaging: Mac build, GitHub Actions for all OSes, sync folder (Phase 6)
+1. User test pass (incl. Phases 4–5) → fix what feels wrong
+2. Packaging: Mac build, GitHub Actions for all OSes, sync folder, new-PC onboarding (Phase 6)
+3. Native Anthropic/Gemini adapters, cost estimates, embeddings + hybrid search
+4. Quiz extras: follow-up chat, dispute grade, code questions; reader "ask about this page"
