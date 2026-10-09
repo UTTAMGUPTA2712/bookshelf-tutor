@@ -159,6 +159,11 @@ pub fn usage(attempts: &[Attempt]) -> Vec<UsageRow> {
 }
 
 pub fn compute(conn: &Connection, attempts: &[Attempt], now: DateTime<FixedOffset>) -> AppResult<Stats> {
+    let interviews: Vec<String> = {
+        let mut stmt = conn.prepare("SELECT created_at FROM interviews WHERE deleted = 0")?;
+        let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+        rows.collect::<Result<_, _>>()?
+    };
     let tz = *now.offset();
     let today = now.date_naive();
     let first = today - Duration::days(ACTIVITY_DAYS - 1);
@@ -170,8 +175,8 @@ pub fn compute(conn: &Connection, attempts: &[Attempt], now: DateTime<FixedOffse
         })
     }
 
-    for a in attempts {
-        if let Some(d) = local_day(&a.created_at, &tz) {
+    for created in attempts.iter().map(|a| &a.created_at).chain(&interviews) {
+        if let Some(d) = local_day(created, &tz) {
             active.insert(d);
             if let Some(x) = day(&mut days, d, first, today) {
                 x.quizzes += 1;

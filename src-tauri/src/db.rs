@@ -150,6 +150,26 @@ const MIGRATIONS: &[&str] = &[
         device_id   TEXT NOT NULL
     );
     "#,
+    // 4: mock interviews (plan, full transcript, per-point coverage and report as JSON)
+    r#"
+    CREATE TABLE interviews (
+        id          TEXT PRIMARY KEY,
+        title       TEXT NOT NULL,
+        persona_id  TEXT NOT NULL,
+        setup       TEXT NOT NULL,
+        questions   TEXT NOT NULL DEFAULT '[]',
+        transcript  TEXT NOT NULL DEFAULT '[]',
+        current_idx INTEGER NOT NULL DEFAULT 0,
+        status      TEXT NOT NULL,
+        report      TEXT,
+        topics      TEXT NOT NULL DEFAULT '[]',
+        model       TEXT NOT NULL DEFAULT '{}',
+        created_at  TEXT NOT NULL,
+        updated_at  TEXT NOT NULL,
+        device_id   TEXT NOT NULL,
+        deleted     INTEGER NOT NULL DEFAULT 0
+    );
+    "#,
 ];
 
 pub fn now() -> String {

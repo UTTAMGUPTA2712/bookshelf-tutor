@@ -56,6 +56,32 @@ Updated: 2026-10-09
       reading from two devices adds up
 - [x] 31 Rust unit tests
 
+## Done — Mock interviews (added on request, not in PLAN.md) — 2026-10-09
+- [x] `interview.rs` + `resources/interviewers.json`: 6 fictional interviewer characters with their own style, way
+      of probing, hint policy and how often they challenge right answers; rotated so recent ones aren't repeated
+      (or pick one)
+- [x] Sources: a chapter, a book (finished chapters, else whole book), weak skill-map topics (grounded in the best
+      matching indexed chapter), or general knowledge. Level junior/mid/senior, length 15/30/45 min (4/7/10 questions)
+- [x] One call plans questions (grounded + cited when there are excerpts) with 3–6 key points each; one call per answer
+      marks each point verified/partial/missing and probes ONE unverified point from a new angle, challenges, hints
+      (on request) or moves on; Rust enforces ≤2 probes per point and a turn cap per question; hints cost 8 points
+- [x] Report: score from point coverage, verdict, depth/clarity, strengths, gaps, best/weakest moment, notes per
+      question, pages to re-read; full transcript kept; missed points become cards; finished questions feed the
+      skill map (junior/mid scores capped at 80%/92% as evidence)
+- [x] `interviews` table (migration 4), export format v4, listed on the Interview page, resumable
+- [x] 35 Rust unit tests
+- [x] v2 (same day): judge → rules → voice pipeline. The judge call classifies the intent (answer / clarify /
+      repeat / thinking aloud / skip / asks for the answer / off-topic) and marks points; Rust decides the move
+      (clarifying etc. are free up to 3 per question; angles never repeat per point); a separate "interviewer's
+      voice" call (new optional role, falls back to the grading model) speaks it as plain streamed text. Hint,
+      "I don't know", "repeat" and "skip" need no model call. "Fast" mode = judge + voice in one call; "Auto" picks
+      fast when a local model runs on CPU
+- [x] Adaptive questions: the plan has spare easy/medium/hard questions; the next one moves up after ≥ 80 and down
+      after < 50
+- [x] Model check before starting: model set up, size (≥ 7B recommended for planning/judging; < 3B blocks unless you
+      confirm), Ollama context vs. plan size, valid JSON from the last "Try this model" (results now saved per PC)
+- [x] 39 Rust unit tests
+
 ## Not verified yet
 - [ ] Clicking through the whole UI (app launched; needs a manual pass by the user)
 - [ ] Quality with a 7B+ local model or a cloud model (only tested with qwen2.5-coder:1.5b — too weak to grade well)
@@ -96,6 +122,7 @@ Updated: 2026-10-09
 ## Not verified yet (Phases 4–5)
 - [ ] A full skill test with a real model (needs a 7B+ local model or a cloud key; not run here — CPU rule)
 - [ ] Card quality from the review call with a real model
+- [ ] A real mock interview: does the model follow the probing rules and keep the persona? (prompt tuning likely)
 - [ ] Skills/Roadmap/Cards/Today pages and the reader "Card" button clicked through in the running app
 
 ## Next

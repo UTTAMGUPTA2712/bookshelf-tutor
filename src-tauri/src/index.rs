@@ -213,6 +213,21 @@ pub fn chapter_chunks(conn: &Connection, fp: &str, chapter_idx: u32) -> AppResul
     Ok(rows.collect::<Result<Vec<_>, _>>()?)
 }
 
+/// All chunks of a book, or only those in the given chapters, in reading order.
+pub fn book_chunks(conn: &Connection, fp: &str, chapters: Option<&[u32]>) -> AppResult<Vec<Chunk>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, chapter_idx, page_start, page_end, text FROM chunks WHERE fingerprint = ?1 ORDER BY id",
+    )?;
+    let rows = stmt.query_map([fp], |r| {
+        Ok(Chunk { id: r.get(0)?, chapter_idx: r.get(1)?, page_start: r.get(2)?, page_end: r.get(3)?, text: r.get(4)? })
+    })?;
+    let all = rows.collect::<Result<Vec<_>, _>>()?;
+    Ok(match chapters {
+        Some(keep) => all.into_iter().filter(|c| keep.contains(&c.chapter_idx)).collect(),
+        None => all,
+    })
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SearchHit {

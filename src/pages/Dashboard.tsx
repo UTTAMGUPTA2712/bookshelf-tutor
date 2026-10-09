@@ -179,7 +179,7 @@ export default function DashboardPage() {
               <Tile label="Reading this week" value={minutes(d.reading.week)} sub={`today ${minutes(d.reading.today)}`} />
               <Tile label="Cards" value={d.cards.total} sub={`${d.cards.reviewedToday} reviewed today`} />
               <Tile
-                label="Quizzes"
+                label="Quizzes & interviews"
                 value={d.activity.reduce((a, x) => a + x.quizzes, 0)}
                 sub="in the last 12 weeks"
               />

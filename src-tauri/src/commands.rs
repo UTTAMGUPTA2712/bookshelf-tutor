@@ -18,7 +18,7 @@ use crate::models::{self, CatalogView, LookupResult, PullProgress, SystemInfo};
 use crate::quiz::{self, Attempt, AttemptSummary, QuizOptions};
 use crate::transfer::{self, ImportMode, ImportPreview, TableChanges};
 use crate::skills::{self, Roadmap, SkillMap};
-use crate::{assessment, cards, db, stats, AppState};
+use crate::{assessment, cards, db, interview, stats, AppState};
 
 // ---------- app & library ----------
 
@@ -259,7 +259,11 @@ pub async fn provider_test(state: State<'_, AppState>, provider_id: String, mode
     let json_ok = llm::extract_json(&text)
         .and_then(|j| serde_json::from_str::<serde_json::Value>(j).ok())
         .is_some_and(|v| v.get("answer").is_some());
-    Ok(TestResult { latency_ms: start.elapsed().as_millis(), json_ok, reply: text, usage })
+    let latency_ms = start.elapsed().as_millis();
+    // Remembered on this machine for the interview's model check.
+    let saved = json!({ "jsonOk": json_ok, "latencyMs": latency_ms as u64, "at": db::now() });
+    let _ = db::set_setting(&state.db(), &format!("model_test:{provider_id}:{model}"), &saved.to_string());
+    Ok(TestResult { latency_ms, json_ok, reply: text, usage })
 }
 
 #[derive(Serialize)]
@@ -371,6 +375,8 @@ pub async fn ollama_delete(state: State<'_, AppState>, provider_id: String, name
 pub enum StreamEvent {
     Token { text: String },
     Status { message: String },
+    /// Plain-text words of the interviewer, as they are written.
+    Speech { text: String },
 }
 
 /// Runs an AI task as its own tokio task so `ai_cancel` can abort it mid-stream.
@@ -802,22 +808,22 @@ pub async fn assessment_prefetch(state: State<'_, AppState>, request_id: String,
 
 #[tauri::command]
 pub fn skills_get(state: State<'_, AppState>, track: String) -> AppResult<SkillMap> {
-    let attempts = quiz::all(&state.db())?;
-    skills::skill_map(&track, &attempts)
+    let db = state.db();
+    skills::skill_map(&track, &quiz::all(&db)?, &interview_evidence(&db)?)
 }
 
 #[tauri::command]
 pub async fn roadmap_get(state: State<'_, AppState>, track: String) -> AppResult<Roadmap> {
     let s = state.inner().clone();
     blocking(move || {
-        let (attempts, books, pace) = {
+        let (attempts, books, pace, extra) = {
             let db = s.db();
             let pace = db::get_pref(&db, "weekly_pace")?.and_then(|p| p.parse().ok()).unwrap_or(3);
-            (quiz::all(&db)?, library::list(&db)?, pace)
+            (quiz::all(&db)?, library::list(&db)?, pace, interview_evidence(&db)?)
         };
         let t = skills::track(&track)?;
         let (chapters, needs_index) = skills::chapter_index(&s.index(), t, &books)?;
-        skills::roadmap(&track, &attempts, &books, &chapters, needs_index, pace)
+        skills::roadmap(&track, &attempts, &books, &chapters, needs_index, pace, &extra)
     })
     .await
 }
@@ -1015,16 +1021,16 @@ pub struct Dashboard {
 pub async fn dashboard_get(state: State<'_, AppState>) -> AppResult<Dashboard> {
     let s = state.inner().clone();
     blocking(move || {
-        let (attempts, books, goal, pace, stats, limit) = {
+        let (attempts, books, goal, pace, stats, limit, extra) = {
             let db = s.db();
             let attempts = quiz::all(&db)?;
             let stats = stats::compute(&db, &attempts, chrono::Local::now().fixed_offset())?;
             let goal = db::get_pref(&db, "goal_track")?.unwrap_or_else(|| "fundamentals".into());
             let pace = db::get_pref(&db, "weekly_pace")?.and_then(|p| p.parse().ok()).unwrap_or(3);
-            (attempts, library::list(&db)?, goal, pace, stats, daily_limit(&db)?)
+            (attempts, library::list(&db)?, goal, pace, stats, daily_limit(&db)?, interview_evidence(&db)?)
         };
         let track = skills::track(&goal).or_else(|_| skills::track("fundamentals"))?;
-        let map = skills::skill_map(&track.id, &attempts)?;
+        let map = skills::skill_map(&track.id, &attempts, &extra)?;
         let mut weak: Vec<WeakTopic> = map
             .topics
             .iter()
@@ -1034,7 +1040,7 @@ pub async fn dashboard_get(state: State<'_, AppState>) -> AppResult<Dashboard> {
         weak.sort_by_key(|t| t.mastery);
         weak.truncate(5);
         let (chapters, needs_index) = skills::chapter_index(&s.index(), track, &books)?;
-        let roadmap = skills::roadmap(&track.id, &attempts, &books, &chapters, needs_index, pace)?;
+        let roadmap = skills::roadmap(&track.id, &attempts, &books, &chapters, needs_index, pace, &extra)?;
         Ok(Dashboard {
             stats,
             goal_track: track.id.clone(),
@@ -1046,6 +1052,501 @@ pub async fn dashboard_get(state: State<'_, AppState>) -> AppResult<Dashboard> {
         })
     })
     .await
+}
+
+// ---------- mock interviews ----------
+
+#[tauri::command]
+pub fn interview_personas() -> Vec<interview::Persona> {
+    interview::personas().to_vec()
+}
+
+fn interview_evidence(conn: &rusqlite::Connection) -> AppResult<Vec<skills::Evidence>> {
+    Ok(interview::all(conn)?.iter().flat_map(interview::evidence).collect())
+}
+
+/// What an interview will be about: title, text chunks to ground it in, taggable topics, default topic.
+struct InterviewContext {
+    title: String,
+    chunks: Vec<index::Chunk>,
+    topics: Vec<(String, String)>,
+    default_topic: Option<String>,
+}
+
+fn topic_pairs<'a>(ts: impl IntoIterator<Item = &'a skills::Topic>) -> Vec<(String, String)> {
+    ts.into_iter().map(|t| (t.id.clone(), t.label.clone())).collect()
+}
+
+fn interview_context(s: &AppState, setup: &interview::Setup) -> AppResult<InterviewContext> {
+    let need_book = || setup.book_fingerprint.clone().ok_or_else(|| AppError::Invalid("Choose a book".into()));
+    let not_indexed = || AppError::Invalid("Open this book once so the app can read it, then start the interview.".into());
+    match setup.source.as_str() {
+        "chapter" => {
+            let fp = need_book()?;
+            let idx_no = setup.chapter_idx.ok_or_else(|| AppError::Invalid("Choose a chapter".into()))?;
+            let book = library::get(&s.db(), &fp)?;
+            let idx = s.index();
+            let chapter = index::chapters(&idx, &fp)?.into_iter().find(|c| c.idx == idx_no).ok_or_else(not_indexed)?;
+            let chunks = index::chapter_chunks(&idx, &fp, idx_no)?;
+            let ids = skills::chapter_topics(&idx, &book, idx_no).unwrap_or_default();
+            let topics = topic_pairs(ids.iter().filter_map(|id| skills::topic(id)));
+            Ok(InterviewContext {
+                title: format!("{} — {}", book.title, chapter.title),
+                chunks,
+                default_topic: ids.first().cloned(),
+                topics,
+            })
+        }
+        "book" => {
+            let fp = need_book()?;
+            let book = library::get(&s.db(), &fp)?;
+            let idx = s.index();
+            if !index::status(&idx, &fp)?.indexed {
+                return Err(not_indexed());
+            }
+            // Prefer the chapters you've finished; otherwise the whole book.
+            let done: Vec<u32> = {
+                let ids = book.progress.as_ref().map(|p| p.chapters_done.clone()).unwrap_or_default();
+                index::chapters(&idx, &fp)?.into_iter().filter(|c| ids.contains(&c.id)).map(|c| c.idx).collect()
+            };
+            let chunks = index::book_chunks(&idx, &fp, (!done.is_empty()).then_some(done.as_slice()))?;
+            Ok(InterviewContext {
+                title: book.title.clone(),
+                chunks,
+                topics: topic_pairs(skills::book_topics(&book)),
+                default_topic: None,
+            })
+        }
+        "topics" | "general" => {
+            let track = skills::track(setup.track.as_deref().unwrap_or("fundamentals"))?;
+            let (attempts, books, extra) = {
+                let db = s.db();
+                (quiz::all(&db)?, library::list(&db)?, interview_evidence(&db)?)
+            };
+            let mut ids = setup.topic_ids.clone();
+            if ids.is_empty() {
+                // Weakest measured topics first, then untested ones.
+                let map = skills::skill_map(&track.id, &attempts, &extra)?;
+                let mut ts: Vec<_> = map.topics.iter().filter(|t| t.mastery.is_none_or(|m| m < 75)).collect();
+                ts.sort_by_key(|t| t.mastery.unwrap_or(45));
+                ids = ts.iter().take(4).map(|t| t.id.clone()).collect();
+                if ids.is_empty() {
+                    ids = track.topics.iter().take(4).map(|t| t.id.clone()).collect();
+                }
+            }
+            let topics: Vec<&skills::Topic> = ids.iter().filter_map(|id| skills::topic(id)).collect();
+            let mut chunks = Vec::new();
+            if setup.source == "topics" {
+                // Ground each topic in the best matching chapter of an indexed book, when there is one.
+                let idx = s.index();
+                for t in &topics {
+                    for b in skills::candidate_books(t, &books) {
+                        if !index::status(&idx, &b.fingerprint)?.indexed {
+                            continue;
+                        }
+                        let matches = skills::topic_chapters(&idx, &b.fingerprint, t)?;
+                        if let Some(m) = skills::best_matches(&matches).first() {
+                            chunks.extend(index::chapter_chunks(&idx, &b.fingerprint, m.chapter.idx)?);
+                            break;
+                        }
+                    }
+                }
+            }
+            Ok(InterviewContext {
+                title: format!("{}: {}", track.label, topics.iter().map(|t| t.label.as_str()).collect::<Vec<_>>().join(", ")),
+                chunks,
+                default_topic: ids.first().cloned(),
+                topics: topic_pairs(topics),
+            })
+        }
+        other => Err(AppError::Invalid(format!("Unknown interview source “{other}”"))),
+    }
+}
+
+#[tauri::command]
+pub async fn interview_start(
+    state: State<'_, AppState>,
+    request_id: String,
+    setup: interview::Setup,
+    on_event: Channel<StreamEvent>,
+) -> AppResult<interview::Interview> {
+    let s = state.inner().clone();
+    let mut setup = setup;
+    if !matches!(setup.level.as_str(), "junior" | "mid" | "senior") {
+        setup.level = "mid".into();
+    }
+    let persona = match &setup.persona_id {
+        Some(id) => interview::persona(id),
+        None => {
+            let recent = interview::recent_personas(&s.db(), 5)?;
+            let seed = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.subsec_nanos() as u64).unwrap_or(7);
+            interview::pick_persona(&recent, seed)
+        }
+    };
+    setup.persona_id = Some(persona.id.clone());
+    if !matches!(setup.mode.as_str(), "fast" | "thorough") {
+        setup.mode = recommended_mode(&s.db()).into();
+    }
+    let targets = llm::resolve_role(&s.db(), "question")?;
+    let ctx = {
+        let s = s.clone();
+        let setup = setup.clone();
+        blocking(move || interview_context(&s, &setup)).await?
+    };
+    let count = interview::question_count(setup.minutes);
+
+    cancellable(&s.clone(), request_id, async move {
+        let _ = on_event.send(StreamEvent::Status { message: format!("{} is preparing your interview…", persona.name) });
+        let max_tokens = 600 + 450 * count as u32;
+        let ((questions, opening, usage), target) = llm::with_fallback(&targets, |t| {
+            // The plan itself is long; leave room for it in a local model's context window.
+            let budget = if t.provider.adapter == "ollama" {
+                let ctx = t.provider.options.num_ctx.unwrap_or(8192) as usize;
+                ctx.saturating_sub(1500 + max_tokens as usize).max(1000) * 3
+            } else {
+                context_budget(&t)
+            };
+            let sources = quiz::label_sources(&index::select_context(&ctx.chunks, budget));
+            let input = interview::PlanInput {
+                persona,
+                level: &setup.level,
+                count,
+                subject: &ctx.title,
+                topics: &ctx.topics,
+                sources: &sources,
+            };
+            let messages = interview::plan_messages(&input);
+            let http = s.http.clone();
+            let mut sink = token_sink(on_event.clone());
+            let topics = ctx.topics.clone();
+            let default_topic = ctx.default_topic.clone();
+            async move {
+                let validate = |p: &interview::PlanOut| interview::validate_plan(p, &sources, count);
+                let reply = llm::chat_json::<interview::PlanOut>(&http, &t, messages, &validate, max_tokens, &mut sink).await?;
+                let qs = interview::normalize_plan(&reply.value, &sources, &topics, default_topic.as_deref(), count);
+                Ok((qs, reply.value.opening.clone(), reply.usage))
+            }
+        })
+        .await?;
+        let topics: Vec<String> = {
+            let mut t: Vec<String> = questions.iter().filter_map(|q| q.topic.clone()).collect();
+            t.sort();
+            t.dedup();
+            t
+        };
+        let model = json!({ "plannedBy": target.describe(), "promptVersion": interview::PROMPT_VERSION, "usage": usage });
+        let iv = interview::new_interview(setup, persona, ctx.title.clone(), &opening, questions, topics, model);
+        interview::save(&s.db(), &iv, &s.device_id)?;
+        Ok(iv)
+    })
+    .await
+}
+
+/// Records the candidate's message (answer, hint request or "I don't know") before the interviewer replies.
+#[tauri::command]
+pub fn interview_say(state: State<'_, AppState>, id: String, kind: String, text: String) -> AppResult<interview::Interview> {
+    let db = state.db();
+    let mut iv = interview::get(&db, &id)?;
+    if iv.status != "in_progress" {
+        return Err(AppError::Invalid("This interview is over".into()));
+    }
+    if iv.transcript.last().is_some_and(|t| t.role == "candidate") {
+        return Err(AppError::Invalid("Waiting for the interviewer's reply".into()));
+    }
+    let kind = match kind.as_str() {
+        "hint_request" | "dont_know" => kind,
+        _ if text.trim().is_empty() => return Err(AppError::Invalid("Write an answer first".into())),
+        _ => "answer".to_string(),
+    };
+    interview::add_candidate(&mut iv, &kind, &text);
+    iv.updated_at = db::now();
+    interview::save(&db, &iv, &state.device_id)?;
+    Ok(iv)
+}
+
+fn voice_targets(conn: &rusqlite::Connection) -> AppResult<Vec<Target>> {
+    match llm::resolve_role(conn, "interviewer") {
+        Ok(t) if !t.is_empty() => Ok(t),
+        _ => llm::resolve_role(conn, "grade"),
+    }
+}
+
+/// Fast (one call per answer) when the judge or the voice runs locally on a CPU; thorough otherwise.
+fn recommended_mode(conn: &rusqlite::Connection) -> &'static str {
+    let local = |role: &str| llm::resolve_role(conn, role).ok().and_then(|t| t.first().map(|t| llm::is_local(&t.provider)));
+    let judge_local = local("grade").unwrap_or(false);
+    let voice_local = voice_targets(conn).ok().and_then(|t| t.first().map(|t| llm::is_local(&t.provider))).unwrap_or(false);
+    if (judge_local || voice_local) && models::system_info().accelerator == "cpu" {
+        "fast"
+    } else {
+        "thorough"
+    }
+}
+
+/// The interviewer reacts to the candidate's last message. Thorough mode: judge (intent + points)
+/// → rules decide the move → the interviewer's voice says it. Fast mode: one call does both.
+/// Obvious messages (hint, "I don't know", "repeat", "skip") skip the judge.
+#[tauri::command]
+pub async fn interview_respond(
+    state: State<'_, AppState>,
+    request_id: String,
+    id: String,
+    on_event: Channel<StreamEvent>,
+) -> AppResult<interview::Interview> {
+    let s = state.inner().clone();
+    let iv = interview::get(&s.db(), &id)?;
+    let Some(last) = iv.transcript.last().filter(|t| t.role == "candidate").cloned() else {
+        return Ok(iv); // nothing to answer
+    };
+    let fast = iv.setup.mode == "fast";
+    let quick = interview::quick_judgement(&iv, &last.kind, &last.text);
+    let (judges, voices) = {
+        let db = s.db();
+        let judges = if quick.is_none() { llm::resolve_role(&db, "grade")? } else { vec![] };
+        (judges, voice_targets(&db).unwrap_or_default())
+    };
+    let name = interview::persona(&iv.persona_id).name.clone();
+    cancellable(&s.clone(), request_id, async move {
+        let out = match quick {
+            Some(o) => o,
+            None => {
+                let (out, _) = llm::with_fallback(&judges, |t| {
+                    let messages = interview::judge_messages(&iv, &last.text, fast);
+                    let http = s.http.clone();
+                    let mut sink = token_sink(on_event.clone());
+                    async move {
+                        let validate = |o: &interview::JudgeOut| interview::validate_judge(o, fast);
+                        let r = llm::chat_json::<interview::JudgeOut>(&http, &t, messages, &validate, if fast { 700 } else { 400 }, &mut sink)
+                            .await?;
+                        Ok(r.value)
+                    }
+                })
+                .await?;
+                out
+            }
+        };
+        let before = iv.transcript.len();
+        let mut next = iv.clone();
+        let decision = interview::decide(&mut next, &out);
+        let speech = if !decision.needs_voice() {
+            String::new()
+        } else if fast || voices.is_empty() {
+            out.message.clone()
+        } else {
+            let _ = on_event.send(StreamEvent::Status { message: format!("{name} is answering…") });
+            let said = llm::with_fallback(&voices, |t| {
+                let messages = interview::voice_messages(&next, &decision, &last.text);
+                let http = s.http.clone();
+                let ev = on_event.clone();
+                async move {
+                    let mut sink = move |tok: &str| {
+                        let _ = ev.send(StreamEvent::Speech { text: tok.to_string() });
+                    };
+                    let (text, _) = llm::chat_stream(&http, &t, &messages, false, 220, &mut sink).await?;
+                    Ok(text)
+                }
+            })
+            .await;
+            match said {
+                Ok((text, _)) => interview::clean_speech(&text, &name),
+                Err(AppError::Cancelled) => return Err(AppError::Cancelled),
+                Err(e) => {
+                    log::warn!("interviewer voice failed, using a fixed line: {e}");
+                    String::new()
+                }
+            }
+        };
+        interview::commit(&mut next, &decision, &speech);
+        next.updated_at = db::now();
+        let db = s.db();
+        let current = interview::get(&db, &id)?;
+        if current.transcript.len() != before {
+            return Ok(current); // answered meanwhile (e.g. a second window)
+        }
+        interview::save(&db, &next, &s.device_id)?;
+        Ok(next)
+    })
+    .await
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CheckItem {
+    role: String,
+    job: String,
+    provider_id: Option<String>,
+    model: Option<String>,
+    /// "ok" | "warn" | "bad"
+    level: String,
+    messages: Vec<String>,
+    /// From the last "Try this model" run on this machine.
+    tested: Option<serde_json::Value>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelCheck {
+    items: Vec<CheckItem>,
+    recommended_mode: String,
+    /// Something is badly wrong (no model, model far too small, JSON failed).
+    blocking: bool,
+}
+
+/// Checks the models an interview will use, before starting: set up, big enough, enough context,
+/// returns valid JSON (from the last "Try this model" on this PC).
+#[tauri::command]
+pub async fn interview_check(state: State<'_, AppState>, minutes: u32) -> AppResult<ModelCheck> {
+    let s = state.inner().clone();
+    let jobs = [
+        ("question", "Plans the questions", 3.0f32, 7.0f32, true),
+        ("grade", "Judges your answers", 3.0, 7.0, true),
+        ("interviewer", "Speaks as the interviewer", 1.0, 3.0, false),
+    ];
+    let count = interview::question_count(minutes) as u32;
+    let plan_tokens = 600 + 450 * (count + interview::spare_count(count as usize) as u32);
+    let mut items = Vec::new();
+    for (role, job, bad_below, warn_below, needs_json) in jobs {
+        let resolved = if role == "interviewer" { voice_targets(&s.db()) } else { llm::resolve_role(&s.db(), role) };
+        let t = match resolved {
+            Ok(t) if !t.is_empty() => t[0].clone(),
+            Ok(_) | Err(_) => {
+                let msg = match llm::resolve_role(&s.db(), role) {
+                    Err(e) => e.to_string(),
+                    Ok(_) => "No model chosen".into(),
+                };
+                items.push(CheckItem { role: role.into(), job: job.into(), provider_id: None, model: None, level: "bad".into(), messages: vec![msg], tested: None });
+                continue;
+            }
+        };
+        let mut level = "ok";
+        let mut messages: Vec<String> = Vec::new();
+        fn worse(l: &'static str, m: String, level: &mut &'static str, messages: &mut Vec<String>) {
+            if l == "bad" || (l == "warn" && *level == "ok") {
+                *level = l;
+            }
+            messages.push(m);
+        }
+        if role == "interviewer" && llm::resolve_role(&s.db(), "interviewer").map(|t| t.is_empty()).unwrap_or(true) {
+            messages.push("Uses the grading model (set “Interviewer's voice” in Settings to use a smaller, faster one).".into());
+        }
+        if llm::is_local(&t.provider) {
+            let size = if t.provider.adapter == "ollama" {
+                llm::list_models(&s.http, &t.provider, None)
+                    .await
+                    .ok()
+                    .and_then(|ms| ms.into_iter().find(|m| m.id == t.model))
+                    .and_then(|m| m.parameter_size.as_deref().and_then(llm::param_billions))
+                    .or_else(|| llm::param_billions(&t.model))
+            } else {
+                llm::param_billions(&t.model)
+            };
+            match size {
+                Some(b) if b < bad_below => worse("bad", format!("{} is a {b}B model — too small for this job (needs {warn_below:.0}B or more).", t.model), &mut level, &mut messages),
+                Some(b) if b < warn_below => worse("warn", format!("{} is a {b}B model — expect mistakes; {warn_below:.0}B or more works much better.", t.model), &mut level, &mut messages),
+                Some(_) => {}
+                None => worse("warn", format!("Couldn't tell how big {} is.", t.model), &mut level, &mut messages),
+            }
+            if t.provider.adapter == "ollama" && role == "question" {
+                let ctx = t.provider.options.num_ctx.unwrap_or(8192);
+                if (ctx as u32) < plan_tokens + 2500 {
+                    worse("warn", format!("Context is {ctx} tokens; planning a {minutes}-minute interview needs about {} — book excerpts will be cut short. Raise “Context” for this provider in Settings or pick a shorter interview.", plan_tokens + 2500), &mut level, &mut messages);
+                }
+            }
+        }
+        let tested: Option<serde_json::Value> = db::get_setting(&s.db(), &format!("model_test:{}:{}", t.provider.id, t.model))?
+            .and_then(|v| serde_json::from_str(&v).ok());
+        if needs_json {
+            match tested.as_ref().and_then(|v| v.get("jsonOk")).and_then(|v| v.as_bool()) {
+                Some(false) => worse("bad", "Its last test didn't return valid JSON, which this job needs.".into(), &mut level, &mut messages),
+                Some(true) => {}
+                None => worse("warn", "Not tested on this computer yet.".into(), &mut level, &mut messages),
+            }
+        }
+        items.push(CheckItem {
+            role: role.into(),
+            job: job.into(),
+            provider_id: Some(t.provider.id.clone()),
+            model: Some(t.model.clone()),
+            level: level.into(),
+            messages,
+            tested,
+        });
+    }
+    let blocking = items.iter().any(|i| i.level == "bad");
+    let mode = recommended_mode(&s.db()).to_string();
+    Ok(ModelCheck { items, recommended_mode: mode, blocking })
+}
+
+/// Ends the interview (early or after the last question) and writes the report.
+#[tauri::command]
+pub async fn interview_finish(
+    state: State<'_, AppState>,
+    request_id: String,
+    id: String,
+    on_event: Channel<StreamEvent>,
+) -> AppResult<interview::Interview> {
+    let s = state.inner().clone();
+    let mut iv = interview::get(&s.db(), &id)?;
+    if iv.status == "in_progress" {
+        interview::stop(&mut iv);
+    }
+    let targets = llm::resolve_role(&s.db(), "grade").unwrap_or_default();
+    cancellable(&s.clone(), request_id, async move {
+        let persona = interview::persona(&iv.persona_id);
+        let reply = if targets.is_empty() || interview::asked(&iv).next().is_none() {
+            None
+        } else {
+            let _ = on_event.send(StreamEvent::Status { message: format!("{} is writing up notes…", persona.name) });
+            let iv2 = iv.clone();
+            llm::with_fallback(&targets, |t| {
+                let messages = interview::report_messages(&iv2);
+                let http = s.http.clone();
+                let mut sink = token_sink(on_event.clone());
+                async move {
+                    let r = llm::chat_json::<interview::ReportOut>(&http, &t, messages, &interview::validate_report, 2000, &mut sink).await?;
+                    Ok((r.value, t.describe()))
+                }
+            })
+            .await
+            .ok()
+            .map(|(r, _)| r)
+        };
+        let (out, by) = match reply {
+            Some((r, by)) => (Some(r), by),
+            None => (None, json!({ "local": true })),
+        };
+        iv.report = Some(interview::build_report(&iv, out.as_ref(), by));
+        iv.status = "completed".into();
+        iv.updated_at = db::now();
+        let db = s.db();
+        if !cards::has_cards_for(&db, &iv.id)? {
+            let llm_cards = out.as_ref().map(|r| r.cards.as_slice()).unwrap_or_default();
+            let due = cards::tomorrow_start();
+            for c in interview::gap_cards(&iv, llm_cards) {
+                if let Err(e) = cards::create(&db, &c, due, &s.device_id) {
+                    log::warn!("card not created: {e}");
+                }
+            }
+        }
+        interview::save(&db, &iv, &s.device_id)?;
+        Ok(iv)
+    })
+    .await
+}
+
+#[tauri::command]
+pub fn interviews_list(state: State<'_, AppState>) -> AppResult<Vec<interview::InterviewSummary>> {
+    interview::summaries(&state.db())
+}
+
+#[tauri::command]
+pub fn interview_get(state: State<'_, AppState>, id: String) -> AppResult<interview::Interview> {
+    interview::get(&state.db(), &id)
+}
+
+#[tauri::command]
+pub fn interview_delete(state: State<'_, AppState>, id: String) -> AppResult<()> {
+    interview::delete(&state.db(), &id, &state.device_id)
 }
 
 // ---------- export / import ----------

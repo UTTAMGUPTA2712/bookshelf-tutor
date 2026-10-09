@@ -162,7 +162,26 @@ pub fn delete_provider(conn: &Connection, id: &str, device_id: &str) -> AppResul
 
 // ---------- roles ----------
 
-pub const ROLES: &[(&str, &str)] = &[("question", "Writing questions"), ("grade", "Grading & reviews")];
+pub const ROLES: &[(&str, &str)] = &[
+    ("question", "Writing questions"),
+    ("grade", "Grading & reviews"),
+    ("interviewer", "Interviewer's voice (optional — uses the grading model if empty)"),
+];
+
+/// Runs on this machine (Ollama or a localhost server) rather than in the cloud.
+pub fn is_local(p: &ProviderConfig) -> bool {
+    p.adapter == "ollama" || ["localhost", "127.0.0.1", "0.0.0.0", "[::1]"].iter().any(|h| p.base_url.contains(h))
+}
+
+/// "7.6B" / "qwen2.5-coder:1.5b" / "smollm:135m" → billions of parameters.
+pub fn param_billions(s: &str) -> Option<f32> {
+    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let re = RE.get_or_init(|| regex::Regex::new(r"(?i)(?:^|[^0-9.])(\d+(?:\.\d+)?)\s*([bm])(?:$|[^a-z])").expect("regex"));
+    re.captures_iter(s).last().and_then(|c| {
+        let n: f32 = c[1].parse().ok()?;
+        Some(if c[2].eq_ignore_ascii_case("m") { n / 1000.0 } else { n })
+    })
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -642,6 +661,16 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn model_sizes_from_names() {
+        assert_eq!(param_billions("qwen2.5-coder:1.5b"), Some(1.5));
+        assert_eq!(param_billions("llama3.1:8b"), Some(8.0));
+        assert_eq!(param_billions("7.6B"), Some(7.6));
+        assert_eq!(param_billions("smollm:135m"), Some(0.135));
+        assert_eq!(param_billions("gpt-4o-mini"), None);
+        assert_eq!(param_billions("qwen2.5:latest"), None);
+    }
 
     #[test]
     fn extracts_json_from_messy_replies() {

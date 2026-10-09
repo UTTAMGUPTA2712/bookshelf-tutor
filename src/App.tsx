@@ -1,5 +1,15 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { BookOpen, Gauge, History, Layers, Library as LibraryIcon, Map as MapIcon, Settings as SettingsIcon, Sun } from "lucide-react";
+import {
+  BookOpen,
+  Gauge,
+  History,
+  Layers,
+  Library as LibraryIcon,
+  Map as MapIcon,
+  MessagesSquare,
+  Settings as SettingsIcon,
+  Sun,
+} from "lucide-react";
 import { NavLink, Route, Routes } from "react-router";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useState } from "react";
@@ -12,6 +22,8 @@ import HistoryPage from "./pages/History";
 import SkillsPage from "./pages/Skills";
 import DashboardPage from "./pages/Dashboard";
 import CardsPage from "./pages/Cards";
+import InterviewsPage from "./pages/Interviews";
+import InterviewSessionPage from "./pages/InterviewSession";
 import RoadmapPage from "./pages/Roadmap";
 import AssessmentPage from "./pages/Assessment";
 import SettingsPage from "./pages/Settings";
@@ -62,6 +74,7 @@ const nav = [
   { to: "/", label: "Today", icon: Sun },
   { to: "/library", label: "Library", icon: LibraryIcon },
   { to: "/cards", label: "Cards", icon: Layers },
+  { to: "/interview", label: "Interview", icon: MessagesSquare },
   { to: "/skills", label: "Skills", icon: Gauge },
   { to: "/roadmap", label: "Roadmap", icon: MapIcon },
   { to: "/history", label: "Quizzes", icon: History },
@@ -128,6 +141,8 @@ export default function App() {
           <Route path="/" element={<DashboardPage />} />
           <Route path="/library" element={<LibraryPage />} />
           <Route path="/cards" element={<CardsPage />} />
+          <Route path="/interview" element={<InterviewsPage />} />
+          <Route path="/interview/:id" element={<InterviewSessionPage />} />
           <Route path="/book/:fingerprint" element={<ReaderPage />} />
           <Route path="/quiz/:id" element={<QuizPage />} />
           <Route path="/history" element={<HistoryPage />} />

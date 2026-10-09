@@ -143,7 +143,7 @@ const MATCH_THRESHOLD: f32 = 0.6;
 const STRONG_BODY: f32 = 1.0;
 
 /// The chapters worth suggesting: those named after the topic if any, else clear text matches.
-fn best_matches(matches: &[ChapterMatch]) -> Vec<&ChapterMatch> {
+pub fn best_matches(matches: &[ChapterMatch]) -> Vec<&ChapterMatch> {
     let titled: Vec<&ChapterMatch> = matches.iter().filter(|m| m.title_match).collect();
     if !titled.is_empty() {
         return titled;
@@ -210,7 +210,7 @@ pub fn topic_chapters(idx: &Connection, fp: &str, topic: &Topic) -> AppResult<Ve
 }
 
 /// Topics a book can teach: those whose book tags overlap the book's tags.
-fn book_topics(book: &BookView) -> Vec<&'static Topic> {
+pub fn book_topics(book: &BookView) -> Vec<&'static Topic> {
     let tags: HashSet<&str> = book.topics.iter().map(String::as_str).collect();
     tracks()
         .iter()
@@ -328,8 +328,15 @@ pub fn combine(evidence: &[&Evidence]) -> Option<Mastery> {
     })
 }
 
+#[cfg(test)]
 pub fn mastery_map(attempts: &[Attempt]) -> HashMap<String, Mastery> {
-    let evidence: Vec<Evidence> = attempts.iter().flat_map(evidence_from).collect();
+    mastery_map_with(attempts, &[])
+}
+
+/// Mastery from attempts plus evidence recorded elsewhere (mock interviews).
+pub fn mastery_map_with(attempts: &[Attempt], extra: &[Evidence]) -> HashMap<String, Mastery> {
+    let mut evidence: Vec<Evidence> = attempts.iter().flat_map(evidence_from).collect();
+    evidence.extend(extra.iter().cloned());
     let mut by_topic: HashMap<&str, Vec<&Evidence>> = HashMap::new();
     for e in &evidence {
         by_topic.entry(&e.topic).or_default().push(e);
@@ -386,9 +393,9 @@ pub fn assessment_track(a: &Attempt) -> Option<&str> {
     a.model.get("track").and_then(|v| v.as_str())
 }
 
-pub fn skill_map(track_id: &str, attempts: &[Attempt]) -> AppResult<SkillMap> {
+pub fn skill_map(track_id: &str, attempts: &[Attempt], extra: &[Evidence]) -> AppResult<SkillMap> {
     let track = track(track_id)?;
-    let mastery = mastery_map(attempts);
+    let mastery = mastery_map_with(attempts, extra);
     let layer = layers(track);
     let topics = track
         .topics
@@ -570,9 +577,10 @@ pub fn roadmap(
     chapters: &ChapterIndex,
     needs_index: Vec<BookRef>,
     pace: u32,
+    extra: &[Evidence],
 ) -> AppResult<Roadmap> {
     let track = track(track_id)?;
-    let mastery = mastery_map(attempts);
+    let mastery = mastery_map_with(attempts, extra);
     let pace = pace.clamp(1, 20);
 
     let learned: Vec<String> = track
@@ -890,7 +898,7 @@ mod tests {
             vec![],
             Some(60),
         );
-        let r = roadmap("fundamentals", &[test], &books, &idx, vec![], 2).unwrap();
+        let r = roadmap("fundamentals", &[test], &books, &idx, vec![], 2, &[]).unwrap();
         assert!(r.learned.contains(&"complexity".to_string()));
         let pos = |id: &str| r.steps.iter().position(|s| s.topic_id == id);
         assert!(pos("complexity").is_none());

@@ -4,6 +4,7 @@ mod commands;
 mod db;
 mod error;
 mod index;
+mod interview;
 mod library;
 mod llm;
 mod models;
@@ -146,6 +147,15 @@ pub fn run() {
             commands::card_delete,
             commands::reading_tick,
             commands::dashboard_get,
+            commands::interview_personas,
+            commands::interview_start,
+            commands::interview_say,
+            commands::interview_respond,
+            commands::interview_check,
+            commands::interview_finish,
+            commands::interviews_list,
+            commands::interview_get,
+            commands::interview_delete,
             commands::export_progress,
             commands::import_preview,
             commands::import_apply,

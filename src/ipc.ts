@@ -279,7 +279,10 @@ export interface QuizOptions {
   types: ("mcq" | "short" | "explain")[];
 }
 
-export type StreamEvent = { type: "token"; text: string } | { type: "status"; message: string };
+export type StreamEvent =
+  | { type: "token"; text: string }
+  | { type: "status"; message: string }
+  | { type: "speech"; text: string };
 
 export interface TableChanges {
   table: string;
@@ -446,6 +449,119 @@ export interface Dashboard {
   dailyLimit: number;
 }
 
+export interface Persona {
+  id: string;
+  name: string;
+  role: string;
+  style: string;
+  probing: string;
+  hints: string;
+  challenges: string;
+}
+
+export type InterviewSource = "chapter" | "book" | "topics" | "general";
+export type Level = "junior" | "mid" | "senior";
+
+export interface InterviewSetup {
+  source: InterviewSource;
+  bookFingerprint: string | null;
+  chapterIdx: number | null;
+  track: string | null;
+  topicIds: string[];
+  level: Level;
+  minutes: number;
+  personaId: string | null;
+  /** "auto" is resolved when the interview starts. */
+  mode: "auto" | "fast" | "thorough";
+}
+
+export interface ModelCheck {
+  items: {
+    role: string;
+    job: string;
+    providerId: string | null;
+    model: string | null;
+    level: "ok" | "warn" | "bad";
+    messages: string[];
+    tested: { jsonOk: boolean; latencyMs: number; at: string } | null;
+  }[];
+  recommendedMode: "fast" | "thorough";
+  blocking: boolean;
+}
+
+export type PointStatus = "untested" | "verified" | "partial" | "missing";
+
+export interface IQuestion {
+  id: string;
+  kind: "concept" | "scenario" | "design" | "code";
+  difficulty: "easy" | "medium" | "hard";
+  /** 1-based position once asked; spare questions that weren't needed stay null. */
+  order: number | null;
+  topic: string | null;
+  prompt: string;
+  code: string | null;
+  reference: string;
+  sources: Source[];
+  points: { text: string; status: PointStatus; probes: number; angles: string[] }[];
+  turns: number;
+  hints: number;
+  done: boolean;
+  score: number | null;
+}
+
+export interface Turn {
+  role: "interviewer" | "candidate";
+  kind: string;
+  text: string;
+  question: number;
+  at: string;
+}
+
+export interface InterviewReport {
+  overall: number;
+  verdict: "strong" | "good" | "needs_work";
+  coverage: number;
+  depth: number | null;
+  clarity: number | null;
+  summary: string;
+  strengths: string[];
+  gaps: string[];
+  bestMoment: string | null;
+  weakestMoment: string | null;
+  notes: { question: number; note: string }[];
+  rereadPages: number[];
+}
+
+export interface Interview {
+  id: string;
+  title: string;
+  personaId: string;
+  setup: InterviewSetup;
+  questions: IQuestion[];
+  transcript: Turn[];
+  current: number;
+  status: "in_progress" | "wrapping_up" | "completed";
+  report: InterviewReport | null;
+  topics: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface InterviewSummary {
+  id: string;
+  title: string;
+  personaId: string;
+  personaName: string;
+  level: Level;
+  status: Interview["status"];
+  overall: number | null;
+  verdict: InterviewReport["verdict"] | null;
+  questions: number;
+  asked: number;
+  planned: number;
+  createdAt: string;
+}
+
 function channel<T>(onMessage?: (m: T) => void): Channel<T> {
   const ch = new Channel<T>();
   if (onMessage) ch.onmessage = onMessage;
@@ -542,6 +658,20 @@ export const api = {
   deleteCard: (id: string) => invoke<void>("card_delete", { id }),
   readingTick: (fingerprint: string, minutes: number) => invoke<void>("reading_tick", { fingerprint, minutes }),
   dashboard: () => invoke<Dashboard>("dashboard_get"),
+
+  personas: () => invoke<Persona[]>("interview_personas"),
+  startInterview: (requestId: string, setup: InterviewSetup, onEvent: (e: StreamEvent) => void) =>
+    invoke<Interview>("interview_start", { requestId, setup, onEvent: channel(onEvent) }),
+  interviewSay: (id: string, kind: "answer" | "hint_request" | "dont_know", text: string) =>
+    invoke<Interview>("interview_say", { id, kind, text }),
+  interviewRespond: (requestId: string, id: string, onEvent: (e: StreamEvent) => void) =>
+    invoke<Interview>("interview_respond", { requestId, id, onEvent: channel(onEvent) }),
+  finishInterview: (requestId: string, id: string, onEvent: (e: StreamEvent) => void) =>
+    invoke<Interview>("interview_finish", { requestId, id, onEvent: channel(onEvent) }),
+  interviewCheck: (minutes: number) => invoke<ModelCheck>("interview_check", { minutes }),
+  interviews: () => invoke<InterviewSummary[]>("interviews_list"),
+  interview: (id: string) => invoke<Interview>("interview_get", { id }),
+  deleteInterview: (id: string) => invoke<void>("interview_delete", { id }),
 
   exportProgress: (path: string) => invoke<void>("export_progress", { path }),
   importPreview: (path: string) => invoke<ImportPreview>("import_preview", { path }),
