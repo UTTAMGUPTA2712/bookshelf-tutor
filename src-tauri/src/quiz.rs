@@ -48,6 +48,11 @@ pub struct Question {
     pub sources: Vec<Source>,
     pub answer: Option<String>,
     pub grade: Option<Grade>,
+    /// Skill-test questions only: taxonomy topic id and "easy" | "medium" | "hard".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub topic: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub difficulty: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -73,6 +78,9 @@ pub struct Attempt {
     pub model: Value,
     pub questions: Vec<Question>,
     pub overall: Option<Overall>,
+    /// Taxonomy topics this attempt is evidence for (chapter quizzes; skill tests tag each question).
+    #[serde(default)]
+    pub topics: Vec<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -182,6 +190,8 @@ pub struct GenQ {
     pub key_points: Vec<Value>,
     #[serde(default)]
     pub sources: Vec<Value>,
+    #[serde(default)]
+    pub difficulty: String,
 }
 
 fn value_text(v: &Value) -> String {
@@ -227,7 +237,17 @@ fn parse_choice_index(v: &Value, choices: &[String]) -> Option<usize> {
     (idx < choices.len()).then_some(idx)
 }
 
+fn normalize_difficulty(d: &str) -> Option<String> {
+    match d.trim().to_lowercase().as_str() {
+        "easy" | "basic" | "beginner" => Some("easy".into()),
+        "medium" | "intermediate" | "moderate" => Some("medium".into()),
+        "hard" | "difficult" | "advanced" => Some("hard".into()),
+        _ => None,
+    }
+}
+
 /// Turns raw model output into questions, dropping any that aren't grounded in the excerpts.
+/// With no excerpts (skill tests ask from general knowledge) there is nothing to cite.
 pub fn normalize_generated(out: &GenOut, sources: &[Source], max: usize) -> Vec<Question> {
     let mut qs = Vec::new();
     for g in &out.questions {
@@ -249,7 +269,7 @@ pub fn normalize_generated(out: &GenOut, sources: &[Source], max: usize) -> Vec<
                 sources.iter().find(|src| src.label == label).cloned()
             })
             .collect();
-        if cited.is_empty() {
+        if cited.is_empty() && !sources.is_empty() {
             continue; // grounding check: must cite real excerpts
         }
         let (choices, correct_choice) = if qtype == "mcq" {
@@ -280,6 +300,8 @@ pub fn normalize_generated(out: &GenOut, sources: &[Source], max: usize) -> Vec<
             sources: cited,
             answer: None,
             grade: None,
+            topic: None,
+            difficulty: normalize_difficulty(&g.difficulty),
         });
         if qs.len() >= max {
             break;
@@ -331,6 +353,9 @@ pub fn local_grade(q: &Question, answer: &str) -> Option<Grade> {
 }
 
 pub fn grade_messages(q: &Question, answer: &str) -> Vec<Message> {
+    if q.sources.is_empty() {
+        return grade_messages_general(q, answer);
+    }
     let system = r#"You are a fair, precise tutor grading a student's answer to a question about a technical book chapter.
 
 Rules:
@@ -352,6 +377,31 @@ Reply with a JSON object only, exactly in this shape:
         q.reference_answer,
         key_points,
         excerpts_block(&refs),
+        answer.trim()
+    );
+    vec![Message::system(system), Message::user(user)]
+}
+
+/// Skill-test questions have no book excerpts: grade against the reference answer and key points.
+fn grade_messages_general(q: &Question, answer: &str) -> Vec<Message> {
+    let system = r#"You are a fair, precise tutor grading a student's answer to a computer-science question.
+
+Rules:
+- Grade against the reference answer and the key points. Accept other correct answers that are technically accurate.
+- Give full credit for correct ideas expressed in different words. Do not reward vague or padded answers.
+- Be specific: say exactly what is correct, what is missing, and what is wrong (misconceptions).
+- "feedback" teaches the right answer in 2-5 sentences, addressed to the student ("you").
+
+Reply with a JSON object only, exactly in this shape:
+{"score":0,"verdict":"correct|partial|incorrect","correct_points":["..."],"missing_points":["..."],"misconceptions":["..."],"feedback":"...","reread":[]}
+"score" is 0-100."#;
+    let key_points = q.key_points.iter().map(|k| format!("- {k}")).collect::<Vec<_>>().join("\n");
+    let user = format!(
+        "Question ({}): {}\n\nReference answer: {}\n\nKey points:\n{}\n\nStudent's answer:\n<<<\n{}\n>>>",
+        q.qtype,
+        q.prompt,
+        q.reference_answer,
+        key_points,
         answer.trim()
     );
     vec![Message::system(system), Message::user(user)]
@@ -536,10 +586,11 @@ pub fn to_overall(qs: &[Question], s: Option<&SummaryOut>) -> Overall {
 pub fn save(conn: &Connection, a: &Attempt, device_id: &str) -> AppResult<()> {
     conn.execute(
         "INSERT INTO attempts(id, kind, book_fingerprint, chapter_id, chapter_title, status, model, questions, overall,
-                              created_at, updated_at, device_id, deleted)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 0)
+                              created_at, updated_at, device_id, deleted, topics)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 0, ?13)
          ON CONFLICT(id) DO UPDATE SET status = excluded.status, model = excluded.model, questions = excluded.questions,
-             overall = excluded.overall, updated_at = excluded.updated_at, device_id = excluded.device_id",
+             overall = excluded.overall, topics = excluded.topics, updated_at = excluded.updated_at,
+             device_id = excluded.device_id",
         params![
             a.id,
             a.kind,
@@ -552,7 +603,8 @@ pub fn save(conn: &Connection, a: &Attempt, device_id: &str) -> AppResult<()> {
             a.overall.as_ref().map(serde_json::to_string).transpose()?,
             a.created_at,
             a.updated_at,
-            device_id
+            device_id,
+            serde_json::to_string(&a.topics)?
         ],
     )?;
     Ok(())
@@ -572,13 +624,14 @@ fn row_to_attempt(r: &rusqlite::Row) -> rusqlite::Result<Attempt> {
         model: serde_json::from_str(&model).unwrap_or(Value::Null),
         questions: serde_json::from_str(&questions).unwrap_or_default(),
         overall: overall.and_then(|o| serde_json::from_str(&o).ok()),
+        topics: serde_json::from_str(&r.get::<_, String>(11)?).unwrap_or_default(),
         created_at: r.get(9)?,
         updated_at: r.get(10)?,
     })
 }
 
 const ATTEMPT_COLS: &str =
-    "id, kind, book_fingerprint, chapter_id, chapter_title, status, model, questions, overall, created_at, updated_at";
+    "id, kind, book_fingerprint, chapter_id, chapter_title, status, model, questions, overall, created_at, updated_at, topics";
 
 pub fn get(conn: &Connection, id: &str) -> AppResult<Attempt> {
     conn.query_row(&format!("SELECT {ATTEMPT_COLS} FROM attempts WHERE id = ?1 AND deleted = 0"), [id], row_to_attempt)
@@ -586,10 +639,18 @@ pub fn get(conn: &Connection, id: &str) -> AppResult<Attempt> {
         .ok_or_else(|| AppError::NotFound("Quiz not found".into()))
 }
 
+/// Every live attempt, oldest first (evidence for the skill map).
+pub fn all(conn: &Connection) -> AppResult<Vec<Attempt>> {
+    let mut stmt = conn.prepare(&format!("SELECT {ATTEMPT_COLS} FROM attempts WHERE deleted = 0 ORDER BY created_at"))?;
+    let rows = stmt.query_map([], row_to_attempt)?;
+    Ok(rows.collect::<Result<Vec<_>, _>>()?)
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AttemptSummary {
     pub id: String,
+    pub kind: String,
     pub book_fingerprint: Option<String>,
     pub book_title: Option<String>,
     pub chapter_id: Option<String>,
@@ -607,7 +668,7 @@ pub fn list(conn: &Connection, fp: Option<&str>) -> AppResult<Vec<AttemptSummary
          FROM attempts a WHERE deleted = 0 AND (?1 IS NULL OR book_fingerprint = ?1)
          ORDER BY created_at DESC LIMIT 500"
     ))?;
-    let rows = stmt.query_map([fp], |r| Ok((row_to_attempt(r)?, r.get::<_, Option<String>>(11)?)))?;
+    let rows = stmt.query_map([fp], |r| Ok((row_to_attempt(r)?, r.get::<_, Option<String>>(12)?)))?;
     let mut out = Vec::new();
     for row in rows {
         let (a, book_title) = row?;
@@ -616,6 +677,7 @@ pub fn list(conn: &Connection, fp: Option<&str>) -> AppResult<Vec<AttemptSummary
             question_count: a.questions.len(),
             answered: a.questions.iter().filter(|q| q.grade.is_some()).count(),
             id: a.id,
+            kind: a.kind,
             book_fingerprint: a.book_fingerprint,
             book_title,
             chapter_id: a.chapter_id,
@@ -677,6 +739,8 @@ mod tests {
             sources: sources(),
             answer: None,
             grade: None,
+            topic: None,
+            difficulty: None,
         };
         assert_eq!(local_grade(&q, "2").unwrap().score, 100);
         let wrong = local_grade(&q, "0").unwrap();

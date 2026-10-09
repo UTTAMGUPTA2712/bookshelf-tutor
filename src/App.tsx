@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { BookOpen, History, Library as LibraryIcon, Settings as SettingsIcon } from "lucide-react";
+import { BookOpen, Gauge, History, Library as LibraryIcon, Map as MapIcon, Settings as SettingsIcon } from "lucide-react";
 import { NavLink, Route, Routes } from "react-router";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useState } from "react";
@@ -9,6 +9,9 @@ import LibraryPage from "./pages/Library";
 import ReaderPage from "./pages/Reader";
 import QuizPage from "./pages/Quiz";
 import HistoryPage from "./pages/History";
+import SkillsPage from "./pages/Skills";
+import RoadmapPage from "./pages/Roadmap";
+import AssessmentPage from "./pages/Assessment";
 import SettingsPage from "./pages/Settings";
 
 export function useAppInfo() {
@@ -55,6 +58,8 @@ function Onboarding() {
 
 const nav = [
   { to: "/", label: "Library", icon: LibraryIcon },
+  { to: "/skills", label: "Skills", icon: Gauge },
+  { to: "/roadmap", label: "Roadmap", icon: MapIcon },
   { to: "/history", label: "Quizzes", icon: History },
   { to: "/settings", label: "Settings", icon: SettingsIcon },
 ];
@@ -108,6 +113,9 @@ export default function App() {
           <Route path="/book/:fingerprint" element={<ReaderPage />} />
           <Route path="/quiz/:id" element={<QuizPage />} />
           <Route path="/history" element={<HistoryPage />} />
+          <Route path="/skills" element={<SkillsPage />} />
+          <Route path="/roadmap" element={<RoadmapPage />} />
+          <Route path="/assessment/:id" element={<AssessmentPage />} />
           <Route path="/settings" element={<SettingsPage />} />
         </Routes>
       </main>

@@ -35,7 +35,7 @@ function PageLinks({ fingerprint, pages }: { fingerprint: string | null; pages: 
   );
 }
 
-function Md({ children }: { children: string }) {
+export function Md({ children }: { children: string }) {
   return (
     <div className="prose-review text-sm">
       <ReactMarkdown remarkPlugins={[remarkGfm]}>{children}</ReactMarkdown>
@@ -43,7 +43,7 @@ function Md({ children }: { children: string }) {
   );
 }
 
-function List({ title, items, tone }: { title: string; items: string[]; tone: string }) {
+export function List({ title, items, tone }: { title: string; items: string[]; tone: string }) {
   if (!items.length) return null;
   return (
     <div className="mt-2">
@@ -152,7 +152,7 @@ function QuestionReview({
   );
 }
 
-function Review({ attempt, setAttempt }: { attempt: Attempt; setAttempt: (a: Attempt) => void }) {
+export function Review({ attempt, setAttempt }: { attempt: Attempt; setAttempt: (a: Attempt) => void }) {
   const o = attempt.overall;
   const [regrading, setRegrading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -214,7 +214,7 @@ function Review({ attempt, setAttempt }: { attempt: Attempt; setAttempt: (a: Att
 }
 
 /** Grades answers one at a time in the background while the learner keeps going. */
-function useGradingQueue(attemptId: string, onGraded: (a: Attempt) => void) {
+export function useGradingQueue(attemptId: string, onGraded: (a: Attempt) => void) {
   const queue = useRef<{ questionId: string; answer: string }[]>([]);
   const running = useRef(false);
   const currentRequest = useRef<string | null>(null);
@@ -399,6 +399,8 @@ export default function QuizPage() {
     qc.setQueryData(["attempt", id], a);
     qc.invalidateQueries({ queryKey: ["attempts"] });
     qc.invalidateQueries({ queryKey: ["books"] });
+    qc.invalidateQueries({ queryKey: ["skills"] });
+    qc.invalidateQueries({ queryKey: ["roadmap"] });
   };
 
   return (

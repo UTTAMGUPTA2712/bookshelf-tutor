@@ -33,9 +33,16 @@ export default function HistoryPage() {
                 <tr
                   key={a.id}
                   className="cursor-pointer border-b border-line hover:bg-panel"
-                  onClick={() => navigate(`/quiz/${a.id}`)}
+                  onClick={() => navigate(a.kind === "assessment" ? `/assessment/${a.id}` : `/quiz/${a.id}`)}
                 >
-                  <td className="py-2 pr-3">{a.chapterTitle}</td>
+                  <td className="py-2 pr-3">
+                    {a.kind === "assessment" && (
+                      <span className="mr-1.5">
+                        <Badge tone="accent">skill test</Badge>
+                      </span>
+                    )}
+                    {a.chapterTitle}
+                  </td>
                   <td className="py-2 pr-3 text-muted">{a.bookTitle ?? "—"}</td>
                   <td className="py-2 pr-3">
                     {a.score != null ? (

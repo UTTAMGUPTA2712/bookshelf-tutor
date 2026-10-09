@@ -90,6 +90,17 @@ const MIGRATIONS: &[&str] = &[
     );
     CREATE INDEX attempts_book ON attempts(book_fingerprint, created_at);
     "#,
+    // 2: topics per attempt (skill map evidence) + synced learner preferences (goal track, pace)
+    r#"
+    ALTER TABLE attempts ADD COLUMN topics TEXT NOT NULL DEFAULT '[]';
+
+    CREATE TABLE preferences (
+        key        TEXT PRIMARY KEY,
+        value      TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        device_id  TEXT NOT NULL
+    );
+    "#,
 ];
 
 pub fn now() -> String {
@@ -127,6 +138,22 @@ pub fn set_setting(conn: &Connection, key: &str, value: &str) -> AppResult<()> {
         "INSERT INTO device(key, value) VALUES (?1, ?2)
          ON CONFLICT(key) DO UPDATE SET value = excluded.value",
         params![key, value],
+    )?;
+    Ok(())
+}
+
+/// Learner preferences travel with exports (unlike `device` settings).
+pub fn get_pref(conn: &Connection, key: &str) -> AppResult<Option<String>> {
+    Ok(conn
+        .query_row("SELECT value FROM preferences WHERE key = ?1", [key], |r| r.get(0))
+        .optional()?)
+}
+
+pub fn set_pref(conn: &Connection, key: &str, value: &str, device_id: &str) -> AppResult<()> {
+    conn.execute(
+        "INSERT INTO preferences(key, value, updated_at, device_id) VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at, device_id = excluded.device_id",
+        params![key, value, now(), device_id],
     )?;
     Ok(())
 }

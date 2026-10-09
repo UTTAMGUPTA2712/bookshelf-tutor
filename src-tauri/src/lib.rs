@@ -1,3 +1,4 @@
+mod assessment;
 mod commands;
 mod db;
 mod error;
@@ -8,6 +9,7 @@ mod models;
 mod pdf;
 mod quiz;
 mod secrets;
+mod skills;
 mod transfer;
 
 #[cfg(test)]
@@ -119,11 +121,21 @@ pub fn run() {
             commands::ollama_delete,
             commands::ai_cancel,
             commands::quiz_generate,
+            commands::quiz_save_answer,
             commands::quiz_grade,
             commands::quiz_finish,
             commands::attempts_list,
             commands::attempt_get,
             commands::attempt_delete,
+            commands::skill_tracks,
+            commands::assessment_start,
+            commands::assessment_next,
+            commands::assessment_prefetch,
+            commands::skills_get,
+            commands::roadmap_get,
+            commands::roadmap_prepare,
+            commands::prefs_get,
+            commands::prefs_set,
             commands::export_progress,
             commands::import_preview,
             commands::import_apply,

@@ -121,3 +121,44 @@ fn real_catalog_for_this_machine() {
         );
     }
 }
+
+/// Prints which chapters each topic maps to, to tune taxonomy keywords and thresholds.
+///   BOOKS_DIR=../../books cargo test --release real_topic_mapping -- --ignored --nocapture
+#[test]
+#[ignore]
+fn real_topic_mapping() {
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
+    db::migrate(&conn).unwrap();
+    library::scan(&conn, &books_dir(), "test").unwrap();
+    let books = library::list(&conn).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let mut idx = index::open(&dir.path().join("i.sqlite")).unwrap();
+    let only: Vec<String> = std::env::var("TRACKS").map(|t| t.split(',').map(String::from).collect()).unwrap_or_default();
+    for track in crate::skills::tracks().iter().filter(|t| only.is_empty() || only.contains(&t.id)) {
+        let candidates = crate::skills::track_books(track, &books);
+        for b in &candidates {
+            if !index::status(&idx, &b.fingerprint).unwrap().indexed {
+                let p = index::prepare(&library::path_of(&conn, &b.fingerprint).unwrap(), |_, _| {}).unwrap();
+                index::store(&mut idx, &b.fingerprint, &p).unwrap();
+            }
+        }
+        println!("\n===== {} ({} books)", track.label, candidates.len());
+        let (chapters, _) = crate::skills::chapter_index(&idx, track, &books).unwrap();
+        for t in &track.topics {
+            println!("\n## {}", t.label);
+            for b in crate::skills::candidate_books(t, &books) {
+                if let Some(ms) = chapters.get(&(t.id.clone(), b.fingerprint.clone())) {
+                    if ms.is_empty() {
+                        continue;
+                    }
+                    let list: Vec<String> = ms
+                        .iter()
+                        .take(5)
+                        .map(|m| format!("{}{:.1} {}", if m.title_match { "*" } else { "" }, m.score, m.chapter.title))
+                        .collect();
+                    println!("  [{}] {} ({}): {}", b.status, b.title, ms.len(), list.join(" | "));
+                }
+            }
+        }
+    }
+}

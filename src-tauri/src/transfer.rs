@@ -11,7 +11,8 @@ use crate::db::now;
 use crate::error::{AppError, AppResult};
 
 pub const FORMAT: &str = "bookshelf-tutor-export";
-pub const SCHEMA_VERSION: u32 = 1;
+/// 2: `attempts.topics`, `preferences` table. Older files import fine (missing columns take their defaults).
+pub const SCHEMA_VERSION: u32 = 2;
 
 struct Table {
     name: &'static str,
@@ -52,10 +53,11 @@ const TABLES: &[Table] = &[
         key: "id",
         columns: &[
             "id", "kind", "book_fingerprint", "chapter_id", "chapter_title", "status", "model", "questions", "overall",
-            "created_at", "updated_at", "device_id", "deleted",
+            "created_at", "updated_at", "device_id", "deleted", "topics",
         ],
-        json_columns: &["model", "questions", "overall"],
+        json_columns: &["model", "questions", "overall", "topics"],
     },
+    Table { name: "preferences", key: "key", columns: &["key", "value", "updated_at", "device_id"], json_columns: &[] },
 ];
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -218,12 +220,13 @@ pub fn preview(conn: &Connection, file: &ExportFile, device_id: &str) -> AppResu
 }
 
 fn upsert(conn: &Connection, t: &Table, row: &Value) -> AppResult<()> {
-    let placeholders: Vec<String> = (1..=t.columns.len()).map(|i| format!("?{i}")).collect();
-    let sql = format!("INSERT OR REPLACE INTO {} ({}) VALUES ({})", t.name, t.columns.join(", "), placeholders.join(", "));
-    let values: Vec<rusqlite::types::Value> = t
-        .columns
+    // Columns missing from older export files are left out so they take their defaults.
+    let columns: Vec<&str> = t.columns.iter().copied().filter(|c| row.get(*c).is_some()).collect();
+    let placeholders: Vec<String> = (1..=columns.len()).map(|i| format!("?{i}")).collect();
+    let sql = format!("INSERT OR REPLACE INTO {} ({}) VALUES ({})", t.name, columns.join(", "), placeholders.join(", "));
+    let values: Vec<rusqlite::types::Value> = columns
         .iter()
-        .map(|c| match row.get(*c).unwrap_or(&Value::Null) {
+        .map(|c| match &row[*c] {
             Value::Null => rusqlite::types::Value::Null,
             Value::Bool(b) => rusqlite::types::Value::Integer(*b as i64),
             Value::Number(n) => n
@@ -324,6 +327,38 @@ mod tests {
 
         let again = apply(&mut mac, &file, ImportMode::Merge).unwrap();
         assert!(again.iter().all(|c| c.added == 0 && c.updated == 0));
+    }
+
+    #[test]
+    fn old_files_import_and_preferences_travel() {
+        let linux = db_with("linux");
+        let mut mac = db_with("mac");
+        linux
+            .execute(
+                "INSERT INTO attempts(id, kind, status, created_at, updated_at, device_id, topics)
+                 VALUES ('a1', 'chapter', 'completed', '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z', 'linux', '[\"hashing\"]')",
+                [],
+            )
+            .unwrap();
+        db::set_pref(&linux, "weekly_pace", "5", "linux").unwrap();
+
+        let mut file = build_export(&linux, "linux").unwrap();
+        apply(&mut mac, &file, ImportMode::Merge).unwrap();
+        assert_eq!(db::get_pref(&mac, "weekly_pace").unwrap().as_deref(), Some("5"));
+        let topics: String = mac.query_row("SELECT topics FROM attempts WHERE id = 'a1'", [], |r| r.get(0)).unwrap();
+        assert_eq!(topics, "[\"hashing\"]");
+
+        // A version-1 file: no topics column, no preferences table.
+        file.data.remove("preferences");
+        for row in file.data["attempts"].as_array_mut().unwrap() {
+            row.as_object_mut().unwrap().remove("topics");
+            row["id"] = Value::from("a2");
+        }
+        file.schema_version = 1;
+        let mut fresh = db_with("fresh");
+        apply(&mut fresh, &file, ImportMode::Merge).unwrap();
+        let topics: String = fresh.query_row("SELECT topics FROM attempts WHERE id = 'a2'", [], |r| r.get(0)).unwrap();
+        assert_eq!(topics, "[]");
     }
 
     #[test]

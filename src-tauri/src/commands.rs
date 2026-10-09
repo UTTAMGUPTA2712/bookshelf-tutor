@@ -17,7 +17,8 @@ use crate::pdf::{self, Chapter};
 use crate::models::{self, CatalogView, LookupResult, PullProgress, SystemInfo};
 use crate::quiz::{self, Attempt, AttemptSummary, QuizOptions};
 use crate::transfer::{self, ImportMode, ImportPreview, TableChanges};
-use crate::{db, AppState};
+use crate::skills::{self, Roadmap, SkillMap};
+use crate::{assessment, db, AppState};
 
 // ---------- app & library ----------
 
@@ -151,21 +152,26 @@ pub async fn index_book(
             return Ok(st);
         }
     }
-    let path = library::path_of(&state.db(), &fingerprint)?;
     let s = state.inner().clone();
     blocking(move || {
-        let prepared = index::prepare(&path, |page, total| {
+        index_now(&s, &fingerprint, |page, total| {
             let _ = on_progress.send(IndexProgress { page, total });
-        })?;
-        let status = index::store(&mut s.index(), &fingerprint, &prepared)?;
-        // Remember the page count for the library view.
-        s.db().execute(
-            "UPDATE books SET page_count = ?2 WHERE fingerprint = ?1 AND page_count IS NULL",
-            rusqlite::params![fingerprint, status.page_count],
-        )?;
-        Ok(status)
+        })
     })
     .await
+}
+
+/// Extracts and stores one book's index (blocking; call from a blocking thread).
+fn index_now(s: &AppState, fingerprint: &str, on_page: impl FnMut(u32, u32)) -> AppResult<IndexStatus> {
+    let path = library::path_of(&s.db(), fingerprint)?;
+    let prepared = index::prepare(&path, on_page)?;
+    let status = index::store(&mut s.index(), fingerprint, &prepared)?;
+    // Remember the page count for the library view.
+    s.db().execute(
+        "UPDATE books SET page_count = ?2 WHERE fingerprint = ?1 AND page_count IS NULL",
+        rusqlite::params![fingerprint, status.page_count],
+    )?;
+    Ok(status)
 }
 
 #[tauri::command]
@@ -420,14 +426,19 @@ pub async fn quiz_generate(
         let db = s.db();
         (library::get(&db, &fingerprint)?, llm::resolve_role(&db, "question")?)
     };
-    let (chapter, chunks) = {
+    let (chapter, chunks, topics) = {
         let idx = s.index();
         let chapter = index::chapters(&idx, &fingerprint)?
             .into_iter()
             .find(|c| c.idx == chapter_idx)
             .ok_or_else(|| AppError::NotFound("Chapter not found — open the book to index it first".into()))?;
         let chunks = index::chapter_chunks(&idx, &fingerprint, chapter_idx)?;
-        (chapter, chunks)
+        // Which skill-map topics this quiz is evidence for.
+        let topics = skills::chapter_topics(&idx, &book, chapter_idx).unwrap_or_else(|e| {
+            log::warn!("topic mapping failed: {e}");
+            vec![]
+        });
+        (chapter, chunks, topics)
     };
     if chunks.is_empty() {
         return Err(AppError::Invalid("This chapter has no extractable text (it may be scanned images).".into()));
@@ -470,6 +481,7 @@ pub async fn quiz_generate(
             model: json!({ "question": target.describe(), "promptVersion": quiz::PROMPT_VERSION, "usage": usage }),
             questions,
             overall: None,
+            topics,
             created_at: ts.clone(),
             updated_at: ts,
         };
@@ -492,6 +504,15 @@ fn update_question(s: &AppState, attempt_id: &str, question_id: &str, f: impl Fn
     a.updated_at = db::now();
     quiz::save(&db, &a, &s.device_id)?;
     Ok(a)
+}
+
+/// Records an answer without grading it (grading follows in the background).
+#[tauri::command]
+pub fn quiz_save_answer(state: State<'_, AppState>, attempt_id: String, question_id: String, answer: String) -> AppResult<Attempt> {
+    update_question(&state, &attempt_id, &question_id, |q| {
+        q.answer = Some(answer);
+        q.grade = None;
+    })
 }
 
 #[tauri::command]
@@ -545,6 +566,10 @@ pub async fn quiz_finish(
 ) -> AppResult<Attempt> {
     let s = state.inner().clone();
     let mut a = quiz::get(&s.db(), &attempt_id)?;
+    if a.kind == "assessment" {
+        // A skill test ended early: the question on screen was never answered and says nothing.
+        a.questions.retain(|q| q.answer.is_some());
+    }
     for q in a.questions.iter_mut().filter(|q| q.grade.is_none()) {
         let answer = q.answer.clone().unwrap_or_default();
         q.grade = quiz::local_grade(q, "").map(|mut g| {
@@ -604,6 +629,258 @@ pub fn attempt_get(state: State<'_, AppState>, id: String) -> AppResult<Attempt>
 #[tauri::command]
 pub fn attempt_delete(state: State<'_, AppState>, id: String) -> AppResult<()> {
     quiz::delete(&state.db(), &id, &state.device_id)
+}
+
+// ---------- skill test ----------
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillTrack {
+    id: String,
+    label: String,
+    topic_count: usize,
+}
+
+#[tauri::command]
+pub fn skill_tracks() -> Vec<SkillTrack> {
+    skills::tracks()
+        .iter()
+        .map(|t| SkillTrack { id: t.id.clone(), label: t.label.clone(), topic_count: t.topics.len() })
+        .collect()
+}
+
+#[tauri::command]
+pub fn assessment_start(state: State<'_, AppState>, track: String, free_text: bool) -> AppResult<Attempt> {
+    let track = skills::track(&track)?;
+    let a = assessment::new_attempt(track, free_text);
+    quiz::save(&state.db(), &a, &state.device_id)?;
+    Ok(a)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AssessmentStep {
+    attempt: Attempt,
+    /// The question to show now; `None` when the test is over.
+    question_id: Option<String>,
+    topics_done: usize,
+    topics_total: usize,
+    skipped: Vec<String>,
+}
+
+fn step(track: &skills::TrackTopics, attempt: Attempt, question_id: Option<String>) -> AssessmentStep {
+    let (topics_done, topics_total) = assessment::progress(track, &attempt);
+    let skipped = assessment::skipped(track, &attempt);
+    AssessmentStep { attempt, question_id, topics_done, topics_total, skipped }
+}
+
+fn load_assessment(s: &AppState, attempt_id: &str) -> AppResult<(Attempt, &'static skills::TrackTopics)> {
+    let a = quiz::get(&s.db(), attempt_id)?;
+    let track = skills::assessment_track(&a)
+        .ok_or_else(|| AppError::Invalid("This quiz is not a skill test".into()))
+        .and_then(skills::track)?;
+    Ok((a, track))
+}
+
+/// Writes one topic's questions (one model call) and stores them in the attempt's pool.
+async fn write_topic_questions(
+    s: &AppState,
+    attempt_id: &str,
+    track: &'static skills::TrackTopics,
+    topic_id: &str,
+    free_text: bool,
+    on_event: Channel<StreamEvent>,
+) -> AppResult<()> {
+    let topic = skills::topic(topic_id).ok_or_else(|| AppError::NotFound(format!("Unknown topic {topic_id}")))?;
+    let targets = llm::resolve_role(&s.db(), "question")?;
+    let (questions, target) = llm::with_fallback(&targets, |t| {
+        let messages = assessment::generation_messages(&track.label, topic, free_text);
+        let http = s.http.clone();
+        let mut sink = token_sink(on_event.clone());
+        let ev = on_event.clone();
+        let topic_id = topic_id.to_string();
+        let label = topic.label.clone();
+        async move {
+            let _ = ev.send(StreamEvent::Status { message: format!("Writing questions on {label} with {}…", t.model) });
+            let validate = |g: &quiz::GenOut| assessment::validate(g, &topic_id);
+            let reply = llm::chat_json::<quiz::GenOut>(&http, &t, messages, &validate, 1600, &mut sink).await?;
+            Ok(assessment::normalize(&reply.value, &topic_id))
+        }
+    })
+    .await?;
+    let db = s.db();
+    let mut a = quiz::get(&db, attempt_id)?;
+    if !assessment::has_pool(&a, topic_id) {
+        assessment::put_pool(&mut a, topic_id, &questions)?;
+        if let Some(m) = a.model.as_object_mut() {
+            m.entry("question").or_insert(target.describe());
+        }
+        a.updated_at = db::now();
+        quiz::save(&db, &a, &s.device_id)?;
+    }
+    Ok(())
+}
+
+/// The question to answer now: an unanswered one, or the next one the adaptive rules pick
+/// (writing that topic's questions first if needed).
+#[tauri::command]
+pub async fn assessment_next(
+    state: State<'_, AppState>,
+    request_id: String,
+    attempt_id: String,
+    on_event: Channel<StreamEvent>,
+) -> AppResult<AssessmentStep> {
+    let s = state.inner().clone();
+    let (a, track) = load_assessment(&s, &attempt_id)?;
+    if let Some(q) = a.questions.iter().find(|q| q.answer.is_none()) {
+        let id = q.id.clone();
+        return Ok(step(track, a, Some(id)));
+    }
+    cancellable(&s.clone(), request_id, async move {
+        // Normally one or two rounds: write the topic's questions if needed, then take one.
+        for _ in 0..3 {
+            let (mut a, _) = load_assessment(&s, &attempt_id)?;
+            let assessment::Next::Ask { topic, difficulty } = assessment::next(track, &a) else {
+                return Ok(step(track, a, None));
+            };
+            if !assessment::has_pool(&a, &topic) {
+                write_topic_questions(&s, &attempt_id, track, &topic, assessment::free_text(&a), on_event.clone()).await?;
+                continue;
+            }
+            let db = s.db();
+            a = quiz::get(&db, &attempt_id)?; // fresh copy under the lock
+            if let Some(q) = a.questions.iter().find(|q| q.answer.is_none()) {
+                let id = q.id.clone(); // a concurrent call already picked one
+                return Ok(step(track, a, Some(id)));
+            }
+            match assessment::take(&mut a, &topic, difficulty)? {
+                Some(q) => {
+                    let id = q.id.clone();
+                    a.questions.push(q);
+                    a.updated_at = db::now();
+                    quiz::save(&db, &a, &s.device_id)?;
+                    return Ok(step(track, a, Some(id)));
+                }
+                None => {
+                    // Pool used up (the model wrote fewer questions than asked): write fresh ones.
+                    if let Some(pool) = a.model.get_mut("pool").and_then(|p| p.as_object_mut()) {
+                        pool.remove(&topic);
+                    }
+                    quiz::save(&db, &a, &s.device_id)?;
+                }
+            }
+        }
+        Err(AppError::InvalidOutput("Couldn't prepare the next question".into()))
+    })
+    .await
+}
+
+/// Writes the next topic's questions in the background while the learner answers.
+#[tauri::command]
+pub async fn assessment_prefetch(state: State<'_, AppState>, request_id: String, attempt_id: String) -> AppResult<()> {
+    let s = state.inner().clone();
+    let (a, track) = load_assessment(&s, &attempt_id)?;
+    let Some(topic) = assessment::prefetch_topic(track, &a) else { return Ok(()) };
+    let free_text = assessment::free_text(&a);
+    cancellable(&s.clone(), request_id, async move {
+        write_topic_questions(&s, &attempt_id, track, &topic, free_text, Channel::new(|_| Ok(()))).await
+    })
+    .await
+}
+
+// ---------- skill map & roadmap ----------
+
+#[tauri::command]
+pub fn skills_get(state: State<'_, AppState>, track: String) -> AppResult<SkillMap> {
+    let attempts = quiz::all(&state.db())?;
+    skills::skill_map(&track, &attempts)
+}
+
+#[tauri::command]
+pub async fn roadmap_get(state: State<'_, AppState>, track: String) -> AppResult<Roadmap> {
+    let s = state.inner().clone();
+    blocking(move || {
+        let (attempts, books, pace) = {
+            let db = s.db();
+            let pace = db::get_pref(&db, "weekly_pace")?.and_then(|p| p.parse().ok()).unwrap_or(3);
+            (quiz::all(&db)?, library::list(&db)?, pace)
+        };
+        let t = skills::track(&track)?;
+        let (chapters, needs_index) = skills::chapter_index(&s.index(), t, &books)?;
+        skills::roadmap(&track, &attempts, &books, &chapters, needs_index, pace)
+    })
+    .await
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrepareProgress {
+    done: usize,
+    total: usize,
+    title: String,
+}
+
+/// Indexes every book the track's roadmap could point to, so chapters can be suggested.
+#[tauri::command]
+pub async fn roadmap_prepare(
+    state: State<'_, AppState>,
+    track: String,
+    on_progress: Channel<PrepareProgress>,
+) -> AppResult<Vec<String>> {
+    let s = state.inner().clone();
+    blocking(move || {
+        let books = library::list(&s.db())?;
+        let t = skills::track(&track)?;
+        let todo: Vec<(String, String)> = {
+            let idx = s.index();
+            skills::track_books(t, &books)
+                .into_iter()
+                .filter(|b| !index::status(&idx, &b.fingerprint).map(|st| st.indexed).unwrap_or(false))
+                .map(|b| (b.fingerprint.clone(), b.title.clone()))
+                .collect()
+        };
+        let mut errors = Vec::new();
+        for (i, (fp, title)) in todo.iter().enumerate() {
+            let _ = on_progress.send(PrepareProgress { done: i, total: todo.len(), title: title.clone() });
+            if let Err(e) = index_now(&s, fp, |_, _| {}) {
+                errors.push(format!("{title}: {e}"));
+            }
+        }
+        let _ = on_progress.send(PrepareProgress { done: todo.len(), total: todo.len(), title: String::new() });
+        Ok(errors)
+    })
+    .await
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Prefs {
+    goal_track: Option<String>,
+    weekly_pace: u32,
+}
+
+#[tauri::command]
+pub fn prefs_get(state: State<'_, AppState>) -> AppResult<Prefs> {
+    let db = state.db();
+    Ok(Prefs {
+        goal_track: db::get_pref(&db, "goal_track")?,
+        weekly_pace: db::get_pref(&db, "weekly_pace")?.and_then(|p| p.parse().ok()).unwrap_or(3),
+    })
+}
+
+#[tauri::command]
+pub fn prefs_set(state: State<'_, AppState>, goal_track: Option<String>, weekly_pace: Option<u32>) -> AppResult<Prefs> {
+    {
+        let db = state.db();
+        if let Some(t) = goal_track {
+            skills::track(&t)?;
+            db::set_pref(&db, "goal_track", &t, &state.device_id)?;
+        }
+        if let Some(p) = weekly_pace {
+            db::set_pref(&db, "weekly_pace", &p.clamp(1, 20).to_string(), &state.device_id)?;
+        }
+    }
+    prefs_get(state)
 }
 
 // ---------- export / import ----------

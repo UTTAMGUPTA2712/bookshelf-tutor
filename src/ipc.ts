@@ -230,6 +230,9 @@ export interface Question {
   sources: Source[];
   answer: string | null;
   grade: Grade | null;
+  /** Skill-test questions only. */
+  topic?: string;
+  difficulty?: "easy" | "medium" | "hard";
 }
 
 export interface Overall {
@@ -248,15 +251,17 @@ export interface Attempt {
   chapterId: string | null;
   chapterTitle: string | null;
   status: "in_progress" | "completed";
-  model: { question?: { provider: string; model: string } };
+  model: { question?: { provider: string; model: string }; track?: string; freeText?: boolean };
   questions: Question[];
   overall: Overall | null;
+  topics: string[];
   createdAt: string;
   updatedAt: string;
 }
 
 export interface AttemptSummary {
   id: string;
+  kind: "chapter" | "assessment";
   bookFingerprint: string | null;
   bookTitle: string | null;
   chapterId: string | null;
@@ -289,6 +294,97 @@ export interface ImportPreview {
   exportedAt: string;
   appVersion: string;
   changes: TableChanges[];
+}
+
+export interface SkillTrack {
+  id: string;
+  label: string;
+  topicCount: number;
+}
+
+export type TopicStatus = "untested" | "weak" | "learning" | "strong";
+
+export interface TopicView {
+  id: string;
+  label: string;
+  description: string;
+  prereqs: string[];
+  layer: number;
+  mastery: number | null;
+  confidence: number;
+  evidence: number;
+  status: TopicStatus;
+}
+
+export interface SkillMap {
+  track: string;
+  label: string;
+  topics: TopicView[];
+  lastAssessment: {
+    id: string;
+    status: "in_progress" | "completed";
+    score: number | null;
+    summary: string | null;
+    strengths: string[];
+    focusNext: string[];
+    createdAt: string;
+  } | null;
+}
+
+export interface AssessmentStep {
+  attempt: Attempt;
+  questionId: string | null;
+  topicsDone: number;
+  topicsTotal: number;
+  skipped: string[];
+}
+
+export interface BookRef {
+  fingerprint: string;
+  title: string;
+  status: BookStatus;
+}
+
+export interface StepChapter {
+  idx: number;
+  id: string;
+  title: string;
+  startPage: number;
+  endPage: number;
+  done: boolean;
+}
+
+export interface RoadmapStep {
+  topicId: string;
+  label: string;
+  mastery: number | null;
+  status: TopicStatus;
+  reason: string;
+  book: BookRef | null;
+  chapters: StepChapter[];
+  alternatives: BookRef[];
+}
+
+export interface Week {
+  number: number;
+  starts: string;
+  pages: number;
+  items: { topicId: string; topicLabel: string; book: BookRef; chapter: StepChapter }[];
+}
+
+export interface Roadmap {
+  track: string;
+  label: string;
+  pace: number;
+  steps: RoadmapStep[];
+  weeks: Week[];
+  learned: string[];
+  needsIndex: BookRef[];
+}
+
+export interface Prefs {
+  goalTrack: string | null;
+  weeklyPace: number;
 }
 
 function channel<T>(onMessage?: (m: T) => void): Channel<T> {
@@ -346,6 +442,8 @@ export const api = {
     options: QuizOptions,
     onEvent: (e: StreamEvent) => void,
   ) => invoke<Attempt>("quiz_generate", { requestId, fingerprint, chapterIdx, options, onEvent: channel(onEvent) }),
+  saveAnswer: (attemptId: string, questionId: string, answer: string) =>
+    invoke<Attempt>("quiz_save_answer", { attemptId, questionId, answer }),
   gradeAnswer: (
     requestId: string,
     attemptId: string,
@@ -358,6 +456,20 @@ export const api = {
   attempts: (fingerprint?: string) => invoke<AttemptSummary[]>("attempts_list", { fingerprint: fingerprint ?? null }),
   attempt: (id: string) => invoke<Attempt>("attempt_get", { id }),
   deleteAttempt: (id: string) => invoke<void>("attempt_delete", { id }),
+
+  skillTracks: () => invoke<SkillTrack[]>("skill_tracks"),
+  startAssessment: (track: string, freeText: boolean) => invoke<Attempt>("assessment_start", { track, freeText }),
+  assessmentNext: (requestId: string, attemptId: string, onEvent: (e: StreamEvent) => void) =>
+    invoke<AssessmentStep>("assessment_next", { requestId, attemptId, onEvent: channel(onEvent) }),
+  assessmentPrefetch: (requestId: string, attemptId: string) =>
+    invoke<void>("assessment_prefetch", { requestId, attemptId }),
+  skills: (track: string) => invoke<SkillMap>("skills_get", { track }),
+  roadmap: (track: string) => invoke<Roadmap>("roadmap_get", { track }),
+  prepareRoadmap: (track: string, onProgress: (p: { done: number; total: number; title: string }) => void) =>
+    invoke<string[]>("roadmap_prepare", { track, onProgress: channel(onProgress) }),
+  prefs: () => invoke<Prefs>("prefs_get"),
+  setPrefs: (p: { goalTrack?: string; weeklyPace?: number }) =>
+    invoke<Prefs>("prefs_set", { goalTrack: p.goalTrack ?? null, weeklyPace: p.weeklyPace ?? null }),
 
   exportProgress: (path: string) => invoke<void>("export_progress", { path }),
   importPreview: (path: string) => invoke<ImportPreview>("import_preview", { path }),
