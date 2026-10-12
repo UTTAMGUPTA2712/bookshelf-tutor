@@ -144,6 +144,29 @@ function ProviderForm({ presets, initial, onClose }: { presets: Preset[]; initia
               onChange={(e) => setForm({ ...form, options: { ...form.options, numThread: e.target.value ? Number(e.target.value) : null } })}
             />
           </Field>
+          <Field label="Repeat penalty" hint="Higher stops small models looping; above ~1.3 they write broken JSON.">
+            <input
+              className={inputClass}
+              type="number"
+              step="0.05"
+              placeholder="1.15"
+              value={form.options.repeatPenalty ?? ""}
+              onChange={(e) =>
+                setForm({ ...form, options: { ...form.options, repeatPenalty: e.target.value ? Number(e.target.value) : null } })
+              }
+            />
+          </Field>
+          <Field label="Repeat window (tokens)" hint="How far back that penalty looks.">
+            <input
+              className={inputClass}
+              type="number"
+              placeholder="256"
+              value={form.options.repeatLastN ?? ""}
+              onChange={(e) =>
+                setForm({ ...form, options: { ...form.options, repeatLastN: e.target.value ? Number(e.target.value) : null } })
+              }
+            />
+          </Field>
         </div>
       )}
       <ErrorNote error={saveM.error ? errorMessage(saveM.error) : null} />

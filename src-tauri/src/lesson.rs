@@ -19,7 +19,7 @@ use crate::index::Chunk;
 use crate::llm::Message;
 use crate::quiz::Source;
 
-pub const PROMPT_VERSION: &str = "lesson.v1";
+pub const PROMPT_VERSION: &str = "lesson.v2";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -112,10 +112,11 @@ pub fn outline_messages(book: &str, chapter: &str, part: usize, parts: usize, so
 From the excerpts, write:
 - "overview": 2-3 sentences: what this is about and why it matters.
 - "summary": 5-10 concise bullet points that together cover ALL the important ideas. Wrap every technical keyword in **bold**.
-- "terms": EVERY technical term, acronym, jargon word and named concept that appears (aim for completeness — this builds the reader's vocabulary). Each with a one-sentence plain definition and the excerpt label ("S1") where it appears.
+- "terms": up to 15 technical terms, acronyms and named concepts that appear — the ones worth knowing, each with a one-sentence plain definition and the excerpt label ("S1") where it appears.
 - "topics": the 2-5 teachable topics, in reading order, each with a short title and the excerpt labels it covers.
 
 Use ONLY the excerpts. Write in English.
+Every bullet and every term must say something NEW: never repeat a sentence or a term you have already written. Stop and close the JSON once you have covered the excerpts — do not pad the lists.
 
 Reply with a JSON object only, exactly in this shape:
 {"overview":"...","summary":["..."],"terms":[{"term":"...","definition":"...","source":"S1"}],"topics":[{"title":"...","sources":["S1","S2"]}]}"#;

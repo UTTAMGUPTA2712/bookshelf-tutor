@@ -101,6 +101,8 @@ export interface ProviderOptions {
   numCtx?: number | null;
   numThread?: number | null;
   temperature?: number | null;
+  repeatPenalty?: number | null;
+  repeatLastN?: number | null;
 }
 
 export interface Provider {

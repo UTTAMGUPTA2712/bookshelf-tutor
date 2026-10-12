@@ -127,6 +127,8 @@ Updated: 2026-10-09
 - Prefers being shown a plan before big features, then "move ahead".
 
 ## Known issues
+- Sub-3B local models (e.g. `qwen2.5-coder:1.5b`) loop on the lesson prompts — streaming now stops as soon as a
+  line or block repeats and the half-written JSON is salvaged, but the lessons themselves stay thin. 7B+ is the fix.
 - Chinese PDFs may render missing glyphs: pdf.js CMaps/standard fonts aren't bundled yet
 - Some outlines are noisy (e.g. Qt 4 book shows `toc.html` entries); front-matter entries appear as chapters
 - Chapter start from running headers can be one page late (first page of a chapter often has no header)

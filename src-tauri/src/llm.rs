@@ -50,6 +50,10 @@ pub struct ProviderOptions {
     /// Ollama CPU threads. Defaults to half the cores so the computer stays usable.
     pub num_thread: Option<u32>,
     pub temperature: Option<f32>,
+    /// Ollama penalty for repeating itself. Small models loop without it; too high breaks JSON.
+    pub repeat_penalty: Option<f32>,
+    /// How far back that penalty looks, in tokens.
+    pub repeat_last_n: Option<i32>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -424,6 +428,8 @@ pub async fn chat_stream(
                 "temperature": temperature,
                 "num_predict": max_tokens,
                 "num_thread": t.provider.options.num_thread.unwrap_or_else(default_threads),
+                "repeat_penalty": t.provider.options.repeat_penalty.unwrap_or(1.15),
+                "repeat_last_n": t.provider.options.repeat_last_n.unwrap_or(256),
             },
         });
         if json_mode {
@@ -443,6 +449,7 @@ pub async fn chat_stream(
         let mut text = String::new();
         let mut usage = Usage::default();
         let mut buf = Vec::new();
+        let mut watch = Runaway::default();
         let mut stream = resp.bytes_stream();
         while let Some(chunk) = stream.next().await {
             buf.extend_from_slice(&chunk?);
@@ -456,7 +463,8 @@ pub async fn chat_stream(
                     if !c.is_empty() {
                         text.push_str(c);
                         on_token(c);
-                        if is_runaway(&text) {
+                        if watch.tripped(&text) {
+                            on_token(LOOP_NOTE);
                             return Ok((text, usage));
                         }
                     }
@@ -496,6 +504,7 @@ pub async fn chat_stream(
         let mut text = String::new();
         let mut usage = Usage::default();
         let mut buf = String::new();
+        let mut watch = Runaway::default();
         let mut stream = resp.bytes_stream();
         'outer: while let Some(chunk) = stream.next().await {
             buf.push_str(&String::from_utf8_lossy(&chunk?));
@@ -515,7 +524,8 @@ pub async fn chat_stream(
                     if !c.is_empty() {
                         text.push_str(c);
                         on_token(c);
-                        if is_runaway(&text) {
+                        if watch.tripped(&text) {
+                            on_token(LOOP_NOTE);
                             break 'outer;
                         }
                     }
@@ -556,10 +566,56 @@ async fn ollama_can_think(http: &reqwest::Client, base_url: &str, model: &str) -
     can
 }
 
-/// Small models in JSON mode sometimes emit whitespace forever; stop early instead of waiting.
-fn is_runaway(text: &str) -> bool {
-    text.len() - text.trim_end().len() > 200
+/// Watches a growing reply for the two ways a small local model fails to stop: endless
+/// whitespace, and saying the same thing over and over until it runs out of tokens.
+#[derive(Default)]
+pub struct Runaway {
+    checked_at: usize,
 }
+
+impl Runaway {
+    /// Looks only every few hundred characters — scanning on every token would be quadratic.
+    fn tripped(&mut self, text: &str) -> bool {
+        if text.len() < 600 || text.len() - self.checked_at < 512 {
+            return false;
+        }
+        self.checked_at = text.len();
+        is_runaway(text)
+    }
+}
+
+pub fn is_runaway(text: &str) -> bool {
+    text.len() - text.trim_end().len() > 200 || repeats(text.trim_end())
+}
+
+/// The last `n` bytes of `text`, from a character boundary.
+fn tail(text: &str, n: usize) -> &str {
+    let mut i = text.len().saturating_sub(n);
+    while i < text.len() && !text.is_char_boundary(i) {
+        i += 1;
+    }
+    &text[i..]
+}
+
+/// True when the end of a reply is the same line over and over, or the same block of text
+/// three times in a row — a model stuck in a loop.
+fn repeats(text: &str) -> bool {
+    let tail = tail(text, 2400);
+    // A cycle of a few sentences: the same line keeps coming back.
+    let lines: Vec<&str> = tail.lines().map(str::trim).filter(|l| l.len() > 24).collect();
+    let recent = &lines[lines.len().saturating_sub(12)..];
+    if recent.iter().any(|l| recent.iter().filter(|o| o == &l).count() >= 3) {
+        return true;
+    }
+    // The same block repeated, for models that stream JSON without newlines.
+    let b = tail.as_bytes();
+    (24..=b.len() / 3).any(|p| {
+        let end = b.len();
+        b[end - p..] == b[end - 2 * p..end - p] && b[end - p..] == b[end - 3 * p..end - 2 * p]
+    })
+}
+
+const LOOP_NOTE: &str = "\n\n[the model started repeating itself — stopped early]\n\n";
 
 /// Pulls the first complete JSON object out of a model reply (handles code fences,
 /// `<think>` blocks and chatter before/after).
@@ -596,9 +652,58 @@ pub fn extract_json(text: &str) -> Option<&str> {
     None
 }
 
+/// Closes a JSON object that was cut off mid-reply, dropping the half-written element, so a
+/// truncated answer still yields the fields the model did finish.
+pub fn close_truncated(text: &str) -> Option<String> {
+    let start = text.find('{')?;
+    let bytes = text.as_bytes();
+    let mut open: Vec<u8> = Vec::new();
+    let (mut in_str, mut escaped) = (false, false);
+    // Where to cut so nothing dangles: after the last finished element, or before its comma.
+    let mut cut = start + 1;
+    for (i, &b) in bytes.iter().enumerate().skip(start) {
+        if in_str {
+            match b {
+                _ if escaped => escaped = false,
+                b'\\' => escaped = true,
+                b'"' => in_str = false,
+                _ => {}
+            }
+            continue;
+        }
+        match b {
+            b'"' => in_str = true,
+            b'{' | b'[' => {
+                open.push(b);
+                cut = i + 1;
+            }
+            b'}' | b']' => {
+                open.pop()?;
+                if open.is_empty() {
+                    return None; // complete already — extract_json handles it
+                }
+                cut = i + 1;
+            }
+            b',' => cut = i,
+            _ => {}
+        }
+    }
+    if open.is_empty() {
+        return None;
+    }
+    let mut out = text[start..cut].to_string();
+    while let Some(b) = open.pop() {
+        out.push(if b == b'{' { '}' } else { ']' });
+    }
+    Some(out)
+}
+
 fn parse_reply<T: DeserializeOwned>(text: &str, validate: &(dyn Fn(&T) -> Result<(), String> + Sync)) -> Result<T, String> {
-    let raw = extract_json(text).ok_or("the reply did not contain a JSON object")?;
-    let value: T = serde_json::from_str(raw).map_err(|e| format!("invalid JSON for the requested format: {e}"))?;
+    let raw = match extract_json(text) {
+        Some(raw) => raw.to_string(),
+        None => close_truncated(text).ok_or("the reply did not contain a JSON object")?,
+    };
+    let value: T = serde_json::from_str(&raw).map_err(|e| format!("invalid JSON for the requested format: {e}"))?;
     validate(&value)?;
     Ok(value)
 }
@@ -681,6 +786,53 @@ mod tests {
         assert_eq!(extract_json("{\"unterminated\": "), None);
         assert!(is_runaway(&format!("{{\"a\":{}", " \n".repeat(150))));
         assert!(!is_runaway("{\"a\": 1}\n"));
+    }
+
+    #[test]
+    fn catches_a_model_stuck_in_a_loop() {
+        // The real failure: a cycle of sentences that comes round again and again.
+        let cycle = ["Java uses a variety of programming frameworks, including the Spring Framework.",
+                     "Java uses a variety of programming paradigms, including object-oriented programming.",
+                     "Java uses a variety of programming languages, including Java, C++ and Python."];
+        let looped = cycle.iter().cycle().take(12).map(|l| format!("  \"{l}\",")).collect::<Vec<_>>().join("\n");
+        assert!(is_runaway(&looped));
+        // One long block repeated with no newlines at all.
+        assert!(is_runaway(&"the same forty-odd characters again, ".repeat(60)));
+        // Normal varied prose is left alone.
+        let prose = (0..30).map(|i| format!("  \"Bullet {i} explains a different idea from the chapter text.\",")).collect::<Vec<_>>().join("\n");
+        assert!(!is_runaway(&prose));
+        // Short repeats (punctuation, list syntax) must not trip it.
+        assert!(!is_runaway(&format!("{{\"terms\":[{}]}}", (0..40).map(|i| format!("{{\"term\":\"T{i}\"}}")).collect::<Vec<_>>().join(","))));
+
+        let mut w = Runaway::default();
+        assert!(!w.tripped("short"), "nothing to judge yet");
+        assert!(w.tripped(&looped.repeat(2)));
+    }
+
+    #[test]
+    fn salvages_a_truncated_reply() {
+        // Cut off inside a string: the half-written bullet goes, the finished ones stay.
+        assert_eq!(
+            close_truncated("{\"overview\":\"About hashing.\",\"summary\":[\"One\",\"Two\",\"Thr").as_deref(),
+            Some("{\"overview\":\"About hashing.\",\"summary\":[\"One\",\"Two\"]}")
+        );
+        // Cut off between objects in an array.
+        assert_eq!(
+            close_truncated("{\"terms\":[{\"term\":\"Hash\"},{\"term\":").as_deref(),
+            Some("{\"terms\":[{\"term\":\"Hash\"},{}]}")
+        );
+        // A complete object is left to extract_json.
+        assert_eq!(close_truncated("{\"a\":1}"), None);
+        assert_eq!(close_truncated("no json"), None);
+
+        #[derive(Debug, Default, serde::Deserialize)]
+        struct Out {
+            #[serde(default)]
+            summary: Vec<String>,
+        }
+        let cut = "{\"overview\":\"x\",\"summary\":[\"One\",\"Two\",\"Thr";
+        let got = parse_reply::<Out>(cut, &|_| Ok(())).expect("salvaged");
+        assert_eq!(got.summary, ["One", "Two"]);
     }
 
     #[test]
